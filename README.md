@@ -1,6 +1,6 @@
 # Almedia Agency Data API — client (test harness)
 
-Standalone, read-only client for the [Almedia Agency Data API](https://api.almedia.tools).
+Standalone, read-only client
 Built to the `scouting-platform` integrations convention so it drops into
 `backend/packages/integrations/src/almedia/` unchanged when it's time to integrate.
 
