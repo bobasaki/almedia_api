@@ -1,0 +1,37 @@
+/* ---- Invoices: standalone billing view ---- */
+
+.invoices-kpis { margin-bottom: 24px; }
+
+.invoices-layout {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.invoices-col {
+  display: flex;
+  flex-direction: column;
+  padding: 18px 20px 20px;
+}
+
+.invoices-col-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.invoices-col-head h2 { margin: 0; font-size: 16px; letter-spacing: -0.01em; }
+.invoices-col-head span { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+
+/* Taller scroll regions than the compact widget lists — this is a full page. */
+.invoice-list-tall { max-height: min(60vh, 620px); }
+
+.invoices-empty { padding: 40px 20px; }
+.invoices-footnote { margin-top: 18px; }
+
+@media (max-width: 900px) {
+  .invoices-layout { grid-template-columns: 1fr; }
+  .invoice-list-tall { max-height: 420px; }
+}

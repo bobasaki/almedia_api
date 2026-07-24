@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "rootDir": ".."
+  },
+  "include": ["./src", "./server.ts", "./bookings-api.ts", "./enrichment-api.ts", "./vite.config.ts"]
+}
