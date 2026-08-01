@@ -60,6 +60,7 @@ function dealFromCampaign(campaign: Campaign, booking: Booking | undefined): Dea
     signupsPct: campaign.signupsPct,
     d7Purchases: campaign.d7Purchases,
     roasReturn: campaign.roasReturn,
+    appuD14: campaign.appuD14,
     expectedViews,
     deliveryPct: deliveryOf(campaign.viewCount, expectedViews),
     cm: booking?.cm ?? null,
@@ -100,6 +101,7 @@ function dealFromBooking(booking: Booking): Deal {
     signupsPct: null,
     d7Purchases: null,
     roasReturn: null,
+    appuD14: null,
     expectedViews: null,
     deliveryPct: null,
     cm: booking.cm,
@@ -256,6 +258,29 @@ export interface InsightTotals {
   deliveryPct: number | null;
   avgReturnPct: number | null;
   publishedShare: number | null;
+  /** Average payment per user by D14, weighted by acquired users. */
+  avgAppuD14: number | null;
+}
+
+/**
+ * APPU (average payment per user) across a cohort, weighted by acquired users
+ * (modeled signups = views × signupsPct). Campaigns without a user proxy count
+ * once so a lone APPU value still contributes; null when none carry APPU.
+ */
+function weightedAppu(deals: Deal[]): number | null {
+  let weighted = 0;
+  let weight = 0;
+  for (const deal of deals) {
+    if (deal.appuD14 === null || !Number.isFinite(deal.appuD14)) continue;
+    const users =
+      deal.viewCount !== null && deal.signupsPct !== null
+        ? deal.viewCount * deal.signupsPct
+        : null;
+    const w = users !== null && users > 0 ? users : 1;
+    weighted += deal.appuD14 * w;
+    weight += w;
+  }
+  return weight > 0 ? weighted / weight : null;
 }
 
 export function totalsOf(deals: Deal[]): InsightTotals {
@@ -283,6 +308,7 @@ export function totalsOf(deals: Deal[]): InsightTotals {
     deliveryPct: expectedViews > 0 ? (actualViews / expectedViews) * 100 : null,
     avgReturnPct: weightedReturn(deals).value,
     publishedShare: share(published.length, live.length),
+    avgAppuD14: weightedAppu(deals),
   };
 }
 
@@ -398,7 +424,7 @@ export function painPoints(deals: Deal[]): PainPoint[] {
             key: group.key,
             severity: "high",
             issue: "low-return",
-            detail: `${where}: avg return ${group.avgReturnPct.toFixed(0)}% across ${group.measured} measured deals — drop tier; renegotiate or exit.`,
+            detail: `${where}: avg return ${group.avgReturnPct.toFixed(0)}% across ${group.measured} measured deals. Drop tier; renegotiate or exit.`,
           });
         } else if (group.avgReturnPct < 80) {
           points.push({
@@ -406,7 +432,7 @@ export function painPoints(deals: Deal[]): PainPoint[] {
             key: group.key,
             severity: "medium",
             issue: "low-return",
-            detail: `${where}: avg return ${group.avgReturnPct.toFixed(0)}% — rebook only with price adjustment.`,
+            detail: `${where}: avg return ${group.avgReturnPct.toFixed(0)}%. Rebook only with price adjustment.`,
           });
         }
       }
@@ -417,7 +443,7 @@ export function painPoints(deals: Deal[]): PainPoint[] {
           key: group.key,
           severity: group.deliveryPct < 50 ? "high" : "medium",
           issue: "under-delivery",
-          detail: `${where}: views delivered at ${group.deliveryPct.toFixed(0)}% of expectation (${Math.round(group.actualViews).toLocaleString()} vs ${Math.round(group.expectedViews).toLocaleString()}) — CPMs are priced too optimistically.`,
+          detail: `${where}: views delivered at ${group.deliveryPct.toFixed(0)}% of expectation (${Math.round(group.actualViews).toLocaleString()} vs ${Math.round(group.expectedViews).toLocaleString()}). CPMs are priced too optimistically.`,
         });
       }
 
@@ -431,7 +457,7 @@ export function painPoints(deals: Deal[]): PainPoint[] {
           key: group.key,
           severity: "medium",
           issue: "publishing-lag",
-          detail: `${where}: only ${(group.publishedShare * 100).toFixed(0)}% of booked deals are published — chase creators or restructure timelines.`,
+          detail: `${where}: only ${(group.publishedShare * 100).toFixed(0)}% of booked deals are published. Chase creators or restructure timelines.`,
         });
       }
 
@@ -441,7 +467,7 @@ export function painPoints(deals: Deal[]): PainPoint[] {
           key: group.key,
           severity: "high",
           issue: "high-dropout",
-          detail: `${where}: ${(group.droppedShare * 100).toFixed(0)}% of deals dropped — review outreach quality and deal terms.`,
+          detail: `${where}: ${(group.droppedShare * 100).toFixed(0)}% of deals dropped. Review outreach quality and deal terms.`,
         });
       }
     }
@@ -558,6 +584,7 @@ export function buildDigest(
     actualViews: round(deal.viewCount),
     expectedViews: round(deal.expectedViews),
     returnPct: round(deal.returnPct),
+    appuD14: round(deal.appuD14),
     deliveryPct: round(deal.deliveryPct),
   });
 

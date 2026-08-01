@@ -49,7 +49,7 @@ export function AiAnalystWidget({
       <div className="ai-setup">
         <p>
           The AI analyst needs an OpenAI API key. Add <code>OPENAI_API_KEY</code> to{" "}
-          <code>.env</code> and restart <code>pnpm dashboard</code> — the key stays on the local
+          <code>.env</code> and restart <code>pnpm dashboard</code>. The key stays on the local
           server.
         </p>
       </div>
@@ -62,7 +62,7 @@ export function AiAnalystWidget({
         {messages.length === 0 && (
           <div className="ai-intro">
             <p>
-              Ask anything about the data currently in view — filters apply to my answers too.
+              Ask anything about the data currently in view. Filters apply to my answers too.
             </p>
             <div className="ai-suggestions">
               {SUGGESTIONS.map((suggestion) => (

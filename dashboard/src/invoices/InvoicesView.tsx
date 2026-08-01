@@ -1,80 +1,213 @@
 import { useMemo, useState } from "react";
 
+import { InfoTip } from "../InfoTip";
 import { dimensionOptions, filterDeals } from "../insights/enrich";
-import { formatEur, formatPct, timeAgo } from "../insights/format";
+import { formatPct, formatUsd, timeAgo } from "../insights/format";
 import "../insights/insights.css";
-import { buildInvoiceView, type InvoiceLine } from "../insights/invoicing";
-import type { DimensionId, InsightFilters } from "../insights/types";
-import { ALL_FILTERS, DIMENSIONS } from "../insights/types";
+import {
+  buildInvoiceBatches,
+  COST_INVOICED_THROUGH,
+  type BatchMember,
+  type InvoiceBatch,
+} from "../insights/invoicing";
+import { monthLabel } from "../labels";
+import type { InsightFilters } from "../insights/types";
+import { ALL_FILTERS } from "../insights/types";
 import { useDealsData } from "../insights/useDealsData";
-import { useInvoices } from "../insights/useInvoices";
 import "./invoices.css";
 
 /**
- * Invoices — a standalone billing view. Matured channels are grouped into
- * markup tiers ready to invoice; channels can be invoiced before maturity via
- * the checkbox, and any tier climb once they mature surfaces as a top-up due.
- * Shares the live deals feed and the CM/market filter bar with Insights.
+ * Invoices — a standalone billing view. Campaigns are grouped by publish month.
+ * Stage 1 (cost) is invoiced up front the month a campaign publishes; Stage 2
+ * (performance fee) is billed the next month, once the batch's blended return
+ * settles. The Freecash client is already invoiced for cost through
+ * COST_INVOICED_THROUGH (no fees yet), so the view foregrounds what is still due.
  */
 
 function markupLabel(markup: number): string {
   return `+${Math.round(markup * 100)}%`;
 }
 
-function InvoiceRow({
-  line,
+const INVOICED_LABEL = monthLabel(COST_INVOICED_THROUGH);
+
+function BatchMemberRow({
+  member,
   onToggle,
-  showCountdown,
 }: {
-  line: InvoiceLine;
-  onToggle: (line: InvoiceLine) => void;
-  showCountdown?: boolean;
+  member: BatchMember;
+  onToggle: (member: BatchMember) => void;
 }) {
+  const matured = member.status === "matured";
   return (
-    <li className="invoice-row">
+    <li className={`invoice-row batch-member${member.included ? " is-included" : ""}`}>
       <label className="invoice-check">
-        <input type="checkbox" checked={line.invoiced} onChange={() => onToggle(line)} />
+        <input
+          type="checkbox"
+          checked={member.included}
+          disabled={matured}
+          onChange={() => onToggle(member)}
+          title={matured ? "Matured channels always count toward the fee" : "Add to the fee blend"}
+        />
         <span className="invoice-name">
-          {line.channelName}
-          {line.round !== null && <em className="invoice-round">R{line.round}</em>}
+          {member.channelName}
+          {member.round !== null && <em className="invoice-round">R{member.round}</em>}
+          {!matured && (
+            <em className="batch-maturing">{member.daysRemaining ? `${member.daysRemaining}d left` : "maturing"}</em>
+          )}
         </span>
       </label>
       <span className="invoice-meta">
-        {formatPct(line.returnPct)} · {markupLabel(line.tier.markup)}
-        {showCountdown && line.daysRemaining ? ` · ${line.daysRemaining}d left` : ""}
+        {formatPct(member.memberReturn)} · own {markupLabel(member.ownTier.markup)}
+        {member.included && member.performanceFee > 0
+          ? ` · fee +${formatUsd(member.performanceFee)}`
+          : ""}
       </span>
-      <strong className="invoice-amount">{formatEur(line.amount)}</strong>
+      <strong className="invoice-amount">{formatUsd(member.cost)}</strong>
     </li>
+  );
+}
+
+/** Cost chip: green when already invoiced, amber with the amount when still due. */
+function CostChip({ batch }: { batch: InvoiceBatch }) {
+  if (batch.costInvoiced) {
+    return <span className="chip chip-done">✓ Cost invoiced</span>;
+  }
+  return <span className="chip chip-due">Cost due {formatUsd(batch.baseTotal)}</span>;
+}
+
+/** Fee chip: pending while the cohort matures, then the amount due (or none). */
+function FeeChip({ batch }: { batch: InvoiceBatch }) {
+  if (!batch.feeSettled) {
+    return <span className="chip chip-pending">Fee pending</span>;
+  }
+  if (batch.performanceFee > 0) {
+    return <span className="chip chip-fee">Fee due +{formatUsd(batch.performanceFee)}</span>;
+  }
+  return <span className="chip chip-none">No fee</span>;
+}
+
+function MonthRow({
+  batch,
+  onToggle,
+}: {
+  batch: InvoiceBatch;
+  onToggle: (member: BatchMember) => void;
+}) {
+  return (
+    <details className="month-row">
+      <summary className="month-summary">
+        <span className="month-name">
+          {batch.label}
+          <em className="month-count">{batch.memberCount} {batch.memberCount === 1 ? "campaign" : "campaigns"}</em>
+        </span>
+        <span className="month-tags">
+          <CostChip batch={batch} />
+          <FeeChip batch={batch} />
+        </span>
+        <span className="month-blend">
+          {batch.feeSettled ? "blended" : "so far"} {formatPct(batch.blendedReturn)} · {batch.tier.label}
+        </span>
+        <span className="month-total">{formatUsd(batch.amount)}</span>
+        <span className="month-chevron" aria-hidden="true">▾</span>
+      </summary>
+
+      <div className="month-body">
+        <p className="batch-stages">
+          <span>
+            <strong>Stage 1 · Cost</strong> {formatUsd(batch.baseTotal)} —{" "}
+            {batch.costInvoiced ? (
+              <span className="tone-text-good">invoiced in {batch.label}</span>
+            ) : (
+              <span className="tone-text-bad">due in {batch.label}</span>
+            )}
+          </span>
+          <span>
+            <strong>Stage 2 · Performance fee</strong>{" "}
+            {!batch.feeSettled ? (
+              <>pending — cohort still maturing ({batch.maturingCount} to go)</>
+            ) : batch.performanceFee > 0 ? (
+              <>
+                <span className="tone-text-good">+{formatUsd(batch.performanceFee)}</span> due in{" "}
+                {monthLabel(batch.feeMonth)}
+              </>
+            ) : (
+              <>none — blended return under 100%</>
+            )}
+          </span>
+        </p>
+        <p className="batch-sub">
+          {batch.includedCount} of {batch.memberCount} matured · INT {formatUsd(batch.intTotal)}
+          {batch.maturingCount > 0 ? ` · ${batch.maturingCount} maturing, tick to add to the fee blend` : ""}
+        </p>
+        <ul className="invoice-list batch-members">
+          {batch.members.map((member) => (
+            <BatchMemberRow key={member.campaignName} member={member} onToggle={onToggle} />
+          ))}
+        </ul>
+      </div>
+    </details>
   );
 }
 
 export function InvoicesView() {
   const data = useDealsData();
-  const [filters, setFilters] = useState<InsightFilters>(ALL_FILTERS);
-  const { records, loading: invoicesLoading, error: invoicesError, mark, unmark } = useInvoices();
+  const [month, setMonth] = useState<string>("all");
+  const [includedCampaigns, setIncludedCampaigns] = useState<ReadonlySet<string>>(new Set());
 
+  const filters: InsightFilters = useMemo(() => ({ ...ALL_FILTERS, month }), [month]);
   const filtered = useMemo(() => filterDeals(data.deals, filters), [data.deals, filters]);
-  const options = useMemo(() => dimensionOptions(data.deals), [data.deals]);
-  const view = useMemo(() => buildInvoiceView(filtered, records), [filtered, records]);
+  const monthOptions = useMemo(() => dimensionOptions(data.deals).month, [data.deals]);
+  const batches = useMemo(
+    () => buildInvoiceBatches(filtered, includedCampaigns),
+    [filtered, includedCampaigns],
+  );
 
-  const setFilter = (id: DimensionId, value: string) =>
-    setFilters((current) => ({ ...current, [id]: value }));
-  const hasActiveFilters = DIMENSIONS.some(({ id }) => filters[id] !== "all");
-
-  const toggle = (line: InvoiceLine) => {
-    if (line.invoiced) {
-      unmark(line.campaignName);
-      return;
+  const totals = useMemo(() => {
+    let costDue = 0;
+    let costInvoiced = 0;
+    let feesDue = 0;
+    let feesPending = 0;
+    let campaigns = 0;
+    for (const batch of batches) {
+      campaigns += batch.memberCount;
+      if (batch.costInvoiced) costInvoiced += batch.baseTotal;
+      else costDue += batch.baseTotal;
+      if (batch.feeSettled) feesDue += batch.performanceFee;
+      else feesPending += batch.performanceFee;
     }
-    mark({
-      campaignName: line.campaignName,
-      channelName: line.channelName,
-      invoicedAt: new Date().toISOString(),
-      maturedAtInvoice: line.status === "matured",
-      cost: line.cost,
-      returnPct: line.returnPct,
-      tier: line.tier.id,
-      amount: line.amount,
+    return {
+      costDue,
+      costInvoiced,
+      feesDue,
+      feesPending,
+      campaigns,
+      dueNow: costDue + feesDue,
+      costAll: costDue + costInvoiced,
+    };
+  }, [batches]);
+
+  // Campaigns with a cost but no publish date can't be placed in a month.
+  const undated = useMemo(() => {
+    let cost = 0;
+    let count = 0;
+    for (const deal of filtered) {
+      if (deal.cost === null || !Number.isFinite(deal.cost) || deal.cost <= 0) continue;
+      const key = deal.publishedAt?.slice(0, 7);
+      if (!key || !/^\d{4}-\d{2}$/.test(key)) {
+        cost += deal.cost;
+        count += 1;
+      }
+    }
+    return { cost, count };
+  }, [filtered]);
+
+  const toggleInclude = (member: BatchMember) => {
+    if (member.status === "matured") return; // matured channels always count toward the fee
+    setIncludedCampaigns((current) => {
+      const next = new Set(current);
+      if (next.has(member.campaignName)) next.delete(member.campaignName);
+      else next.add(member.campaignName);
+      return next;
     });
   };
 
@@ -88,24 +221,50 @@ export function InvoicesView() {
     );
   }
 
-  const nothing = view.matured.length === 0 && view.maturing.length === 0;
-
   return (
     <main className="dashboard invoices-page">
       <section className="hero">
         <div>
-          <p className="eyebrow">Billing · INT (cost ÷ 1.2) + return commission</p>
-          <h1>Invoices</h1>
+          <p className="eyebrow">Billing · what's still to invoice</p>
+          <div className="hero-title-row">
+            <h1>Invoices</h1>
+            <InfoTip label="How invoicing works" align="start">
+              <p>
+                <strong>Two stages per campaign, both in USD.</strong> Grouped by the month a
+                campaign published.
+              </p>
+              <ul>
+                <li>
+                  <span className="info-tip-term">Stage 1 · Cost</span> — the raw Almedia cost,
+                  invoiced up front the month it publishes (matured or not).
+                </li>
+                <li>
+                  <span className="info-tip-term">Stage 2 · Performance fee</span> = Σ INT × (1 +
+                  commission) − Σ cost (INT = cost ÷ 1.2), billed the next month once the batch's
+                  return settles. Floored at zero.
+                </li>
+                <li>
+                  <span className="info-tip-term">Blended return</span> = Σ media spend (return % ×
+                  cost ÷ 100) ÷ Σ cost picks one commission tier for the month's matured cohort.
+                </li>
+                <li>
+                  <span className="info-tip-term">Already invoiced</span> — the client is paid up on
+                  cost through {INVOICED_LABEL}. No performance fees have been billed yet.
+                </li>
+              </ul>
+            </InfoTip>
+          </div>
           <p className="hero-copy">
-            Matured channels grouped into billing tiers. Tick a channel when invoiced; invoice
-            maturing ones early and any tier climb at maturity shows up as a top-up.
+            Cost is invoiced up front through <strong>{INVOICED_LABEL}</strong>; performance fees
+            have not been billed yet. Everything below marks what is still due — cost for later
+            months, and the fee owed on each settled month.
           </p>
         </div>
         <div className="hero-side">
           <div className="view-actions">
             <p>
               {data.refreshing ? "Refreshing…" : `Updated ${timeAgo(data.fetchedAt)}`} ·{" "}
-              {records.length} invoiced
+              {totals.campaigns} campaigns
             </p>
             <button
               type="button"
@@ -128,143 +287,83 @@ export function InvoicesView() {
         </div>
       )}
 
-      <div className="filters insights-filters">
-        {DIMENSIONS.map(({ id, label }) => (
-          <label key={id}>
-            <span>{label}</span>
-            <select value={filters[id]} onChange={(event) => setFilter(id, event.target.value)}>
-              <option value="all">All</option>
-              {options[id].map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
-        ))}
+      <div className="kpi-grid invoices-kpis">
+        <div className="kpi-card kpi-accent">
+          <p>To invoice now</p>
+          <strong>{formatUsd(totals.dueNow)}</strong>
+          <span>unbilled cost + settled performance fees</span>
+        </div>
+        <div className="kpi-card">
+          <p>Performance fees due</p>
+          <strong className={totals.feesDue > 0 ? "tone-text-good" : undefined}>
+            {formatUsd(totals.feesDue)}
+          </strong>
+          <span>
+            on settled months
+            {totals.feesPending > 0 ? ` · ${formatUsd(totals.feesPending)} still maturing` : ""}
+          </span>
+        </div>
+        <div className="kpi-card">
+          <p>Cost to invoice</p>
+          <strong>{formatUsd(totals.costDue)}</strong>
+          <span>publish months after {INVOICED_LABEL}</span>
+        </div>
+        <div className="kpi-card">
+          <p>Already invoiced</p>
+          <strong>{formatUsd(totals.costInvoiced)}</strong>
+          <span>cost up front through {INVOICED_LABEL}</span>
+        </div>
+      </div>
+
+      <div className="filters invoices-filters">
+        <label>
+          <span>Month</span>
+          <select value={month} onChange={(event) => setMonth(event.target.value)}>
+            <option value="all">All months</option>
+            {monthOptions.map((value) => (
+              <option key={value} value={value}>
+                {/^\d{4}-\d{2}$/.test(value) ? monthLabel(value) : value}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           type="button"
           className="button"
-          disabled={!hasActiveFilters}
-          onClick={() => setFilters(ALL_FILTERS)}
+          disabled={month === "all"}
+          onClick={() => setMonth("all")}
         >
-          Clear filters
+          Clear
         </button>
       </div>
 
-      <div className="kpi-grid invoices-kpis">
-        <div className="kpi-card">
-          <p>Outstanding (matured)</p>
-          <strong>{formatEur(view.outstanding)}</strong>
-          <span>matured value not yet invoiced</span>
-        </div>
-        <div className="kpi-card">
-          <p>Matured total</p>
-          <strong>{formatEur(view.maturedTotal)}</strong>
-          <span>{view.matured.length} channels past day 14</span>
-        </div>
-        <div className="kpi-card">
-          <p>Top-ups due</p>
-          <strong className={view.topUpTotal > 0 ? "tone-text-good" : undefined}>
-            {formatEur(view.topUpTotal)}
-          </strong>
-          <span>{view.topUps.length} matured into a higher tier</span>
-        </div>
-        <div className="kpi-card">
-          <p>Channels invoiced</p>
-          <strong>{records.length}</strong>
-          <span>{view.maturing.length} still maturing</span>
-        </div>
-      </div>
-
-      {invoicesError && (
-        <div className="inline-error" role="alert">
-          {invoicesError}
-        </div>
-      )}
-
-      {nothing ? (
+      {batches.length === 0 ? (
         <div className="panel invoices-empty">
-          <p className="widget-empty">No channels with Almedia cost for the current filters.</p>
+          <p className="widget-empty">No campaigns with Almedia cost for this month.</p>
         </div>
       ) : (
-        <div className="invoices-layout">
-          <section className="panel invoices-col" aria-label="Matured channels">
-            <header className="invoices-col-head">
-              <h2>Matured — ready to invoice</h2>
-              <span>{formatEur(view.outstanding)} outstanding</span>
-            </header>
-
-            <ul className="invoice-tiers">
-              {view.tiers.map((row) => (
-                <li key={row.tier.id}>
-                  <span className="invoice-tier-label">
-                    {row.tier.label} <em>{markupLabel(row.tier.markup)}</em>
-                  </span>
-                  <span className="invoice-tier-meta">
-                    {row.count} {row.count === 1 ? "channel" : "channels"} · {formatEur(row.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-
-            <p className="widget-subheading">Tick when invoiced</p>
-            {view.matured.length === 0 ? (
-              <p className="widget-empty">No matured channels for the current filters.</p>
-            ) : (
-              <ul className="invoice-list invoice-list-tall">
-                {view.matured.map((line) => (
-                  <InvoiceRow key={line.campaignName} line={line} onToggle={toggle} />
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="panel invoices-col" aria-label="Maturing and top-ups">
-            <header className="invoices-col-head">
-              <h2>Maturing — invoice early</h2>
-              <span>tracked to day 14</span>
-            </header>
-            {view.maturing.length === 0 ? (
-              <p className="widget-empty">Nothing maturing for the current filters.</p>
-            ) : (
-              <ul className="invoice-list invoice-list-tall">
-                {view.maturing.map((line) => (
-                  <InvoiceRow key={line.campaignName} line={line} onToggle={toggle} showCountdown />
-                ))}
-              </ul>
-            )}
-
-            <p className="widget-subheading">Top-ups due · matured into a higher tier</p>
-            {view.topUps.length === 0 ? (
-              <p className="widget-empty">No top-ups outstanding.</p>
-            ) : (
-              <ul className="invoice-list">
-                {view.topUps.map((row) => (
-                  <li key={row.campaignName} className="invoice-row">
-                    <span className="invoice-name">
-                      {row.channelName}
-                      {row.round !== null && <em className="invoice-round">R{row.round}</em>}
-                    </span>
-                    <span className="invoice-meta">
-                      {formatEur(row.invoicedAmount)} → {formatEur(row.maturedAmount)}
-                      {row.tierJumped && <em className="tier-jump">tier ↑</em>}
-                    </span>
-                    <strong className="invoice-amount tone-text-good">
-                      +{formatEur(row.topUp)}
-                    </strong>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
+        <section className="panel invoices-months" aria-label="Invoices by publish month">
+          <header className="invoices-col-head">
+            <h2>By publish month</h2>
+            <span>{batches.length} {batches.length === 1 ? "month" : "months"} · click a month to expand</span>
+          </header>
+          <div className="month-list">
+            {batches.map((batch) => (
+              <MonthRow key={batch.month} batch={batch} onToggle={toggleInclude} />
+            ))}
+          </div>
+        </section>
       )}
 
       <p className="widget-footnote invoices-footnote">
-        Invoice = INT (cost ÷ 1.2) × commission by return (&lt;80% +20% · 80% +25% · 85% +30% · 93%
-        +40% · 100% +50% · 113% +60% · 139% +80% · ≥150% +100%). Matured = 14+ days since publish.
-        {invoicesLoading ? " · loading invoice status…" : ""}
+        Cost (Stage 1) is billed the month a campaign publishes; the performance fee (Stage 2) = Σ
+        INT × (1 + commission) − Σ cost bills the next month, floored at zero. Commission comes from
+        the month's blended return (&lt;100% +20% · 100% +25% · 110% +30% · 130% +40% · 150% +50% ·
+        180% +60% · 250% +80% · ≥330% +100%). Matured = 14+ days since publish. Months with no
+        published campaigns don't appear.
+        {undated.count > 0
+          ? ` ${undated.count} campaign${undated.count === 1 ? "" : "s"} (${formatUsd(undated.cost)}) ${undated.count === 1 ? "has" : "have"} a cost but no publish date, so ${undated.count === 1 ? "it isn't" : "they aren't"} scheduled to a month.`
+          : ""}
       </p>
     </main>
   );

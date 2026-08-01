@@ -1,26 +1,35 @@
 import { getMaturityInfo, type MaturityStatus } from "../analytics";
-import type { InvoiceRecord } from "../../../src/bookings/types";
+import { monthLabel } from "../labels";
 import { roundOf } from "./charts";
 import type { Deal } from "./types";
 
 /**
- * Client billing model. The Almedia `cost` field already embeds our base 20%
- * commission, so the internal (INT) price is `cost / 1.2`. We invoice the
- * company off that INT price plus a commission that steps up with the channel's
- * return — `invoice = (cost / 1.2) × (1 + commission)`. The commission IS the
- * markup on INT: at the base tier `(cost / 1.2) × 1.2 = cost`, so sub-80%
- * channels bill at exactly the Almedia cost; a 150% return bills INT × 2.0.
- * The "blended return %" from the rate card is the channel's own returnPct,
- * used as the inclusive lower bound that unlocks each tier:
+ * Client billing model (two calendar months, in USD — the Almedia `cost` field
+ * is dollars). Every campaign is invoiced twice:
  *
- *   return < 80%       → 20%   (the fixed base — everything 0–80%)
- *   return ≥ 80%       → 25%
- *   return ≥ 85%       → 30%
- *   return ≥ 93%       → 40%
- *   return ≥ 100%      → 50%
- *   return ≥ 113%      → 60%
- *   return ≥ 139%      → 80%
- *   return ≥ 150%      → 100%
+ *   1. Publish month  → the raw Almedia `cost` for each campaign.
+ *   2. Next month     → a performance fee on the whole month's batch.
+ *
+ * The Almedia `cost` embeds our base 20%, so the internal price is `INT =
+ * cost / 1.2`. The month's blended return picks one commission tier, and the
+ * client's total charge for that batch is `Σ INT × (1 + commission)`. Since the
+ * cost was already invoiced up front, the performance fee is the remainder:
+ *
+ *   performance fee = Σ INT × (1 + commission) − Σ cost
+ *
+ * At the base tier (commission 20%) `INT × 1.2 = cost`, so the fee is exactly
+ * zero and only the up-front cost is billed. The commission steps up with the
+ * batch's blended return (as a percentage), on inclusive lower bounds from the
+ * rate card (the "min return" column is a decimal, shown here ×100):
+ *
+ *   return < 100%      → 20%   (the fixed base — the fee is zero here)
+ *   return ≥ 100%      → 25%
+ *   return ≥ 110%      → 30%
+ *   return ≥ 130%      → 40%
+ *   return ≥ 150%      → 50%
+ *   return ≥ 180%      → 60%
+ *   return ≥ 250%      → 80%
+ *   return ≥ 330%      → 100%
  *
  * Matured channels (14+ days) can be invoiced at their final tier. A channel
  * that hasn't matured can be invoiced early; we snapshot the amount at that
@@ -32,24 +41,24 @@ export type InvoiceTierId = "c20" | "c25" | "c30" | "c40" | "c50" | "c60" | "c80
 export interface InvoiceTier {
   id: InvoiceTierId;
   label: string;
-  /** Commission fraction added on top of cost, e.g. 0.25 → cost × 1.25. */
+  /** Commission fraction on top of INT, e.g. 0.25 → client charge INT × 1.25. */
   markup: number;
-  /** Exclusive upper bound of returnPct for this tier (Infinity for the top). */
+  /** Exclusive upper bound of the return % for this tier (Infinity for the top). */
   maxReturn: number;
 }
 
 export const INVOICE_TIERS: readonly InvoiceTier[] = [
-  { id: "c20", label: "< 80%", markup: 0.2, maxReturn: 80 },
-  { id: "c25", label: "80–84%", markup: 0.25, maxReturn: 85 },
-  { id: "c30", label: "85–92%", markup: 0.3, maxReturn: 93 },
-  { id: "c40", label: "93–99%", markup: 0.4, maxReturn: 100 },
-  { id: "c50", label: "100–112%", markup: 0.5, maxReturn: 113 },
-  { id: "c60", label: "113–138%", markup: 0.6, maxReturn: 139 },
-  { id: "c80", label: "139–149%", markup: 0.8, maxReturn: 150 },
-  { id: "c100", label: "≥ 150%", markup: 1, maxReturn: Infinity },
+  { id: "c20", label: "< 100%", markup: 0.2, maxReturn: 100 },
+  { id: "c25", label: "100–109%", markup: 0.25, maxReturn: 110 },
+  { id: "c30", label: "110–129%", markup: 0.3, maxReturn: 130 },
+  { id: "c40", label: "130–149%", markup: 0.4, maxReturn: 150 },
+  { id: "c50", label: "150–179%", markup: 0.5, maxReturn: 180 },
+  { id: "c60", label: "180–249%", markup: 0.6, maxReturn: 250 },
+  { id: "c80", label: "250–329%", markup: 0.8, maxReturn: 330 },
+  { id: "c100", label: "≥ 330%", markup: 1, maxReturn: Infinity },
 ];
 
-/** The tier a return falls into. A missing return is treated as the base tier. */
+/** The tier a return % falls into. A missing return is treated as the base tier. */
 export function invoiceTier(returnPct: number | null): InvoiceTier {
   const value = returnPct ?? 0;
   return INVOICE_TIERS.find((tier) => value < tier.maxReturn) ?? INVOICE_TIERS[INVOICE_TIERS.length - 1];
@@ -63,15 +72,14 @@ export function intPrice(cost: number): number {
   return cost / (1 + BASE_MARKUP);
 }
 
-/** The amount to invoice: INT price (cost / 1.2) plus the return-based commission markup. */
+/**
+ * The full client charge for a campaign across both months: INT price (cost /
+ * 1.2) marked up by the return-based commission. The up-front cost invoice plus
+ * the next month's performance fee add up to exactly this.
+ */
 export function invoiceAmount(cost: number | null, returnPct: number | null): number | null {
   if (cost === null || !Number.isFinite(cost)) return null;
   return intPrice(cost) * (1 + invoiceTier(returnPct).markup);
-}
-
-function tierIndex(id: string): number {
-  const index = INVOICE_TIERS.findIndex((tier) => tier.id === id);
-  return index === -1 ? 0 : index;
 }
 
 /**
@@ -81,62 +89,6 @@ function tierIndex(id: string): number {
  */
 function displayName(channelName: string): string {
   return channelName.replace(/_[A-Za-z0-9]+_R\d+[A-Za-z0-9]*$/i, "").trim() || channelName;
-}
-
-/** A campaign that can be invoiced, with its live tier and amount. */
-export interface InvoiceLine {
-  /** Unique Almedia campaign name — the invoice identity. */
-  campaignName: string;
-  /** Human-facing channel/creator name. */
-  channelName: string;
-  /** Round number parsed from the campaign name (e.g. R2), when present. */
-  round: number | null;
-  cost: number;
-  returnPct: number | null;
-  tier: InvoiceTier;
-  amount: number;
-  status: MaturityStatus;
-  daysRemaining: number | null;
-  invoiced: boolean;
-}
-
-/** A campaign invoiced before maturity that has since matured higher. */
-export interface TopUpLine {
-  campaignName: string;
-  channelName: string;
-  round: number | null;
-  invoicedAmount: number;
-  invoicedTier: InvoiceTierId;
-  maturedAmount: number;
-  maturedTier: InvoiceTierId;
-  /** Extra to invoice now: matured amount − amount already invoiced (never negative). */
-  topUp: number;
-  tierJumped: boolean;
-}
-
-export interface TierSummary {
-  tier: InvoiceTier;
-  count: number;
-  /** Sum of Almedia cost in this tier. */
-  base: number;
-  /** Sum of invoice amounts in this tier. */
-  amount: number;
-}
-
-export interface InvoiceView {
-  /** All matured channels grouped into tiers. */
-  tiers: TierSummary[];
-  /** Matured channels, richest first, each flagged if already invoiced. */
-  matured: InvoiceLine[];
-  /** Total invoice value of all matured channels. */
-  maturedTotal: number;
-  /** Value of matured channels not yet invoiced. */
-  outstanding: number;
-  /** Non-matured channels — early-invoice candidates, each flagged if invoiced. */
-  maturing: InvoiceLine[];
-  /** Early-invoiced channels that matured into a bigger bill. */
-  topUps: TopUpLine[];
-  topUpTotal: number;
 }
 
 /** A deal can be invoiced only once we have a cost to mark up and a campaign key. */
@@ -149,94 +101,211 @@ function isEligible(deal: Deal): deal is Deal & { cost: number; campaignName: st
   );
 }
 
-function toLine(
-  deal: Deal & { cost: number; campaignName: string },
-  invoiced: boolean,
-  now: Date,
-): InvoiceLine {
-  const maturity = getMaturityInfo(deal.publishedAt, now);
-  return {
-    campaignName: deal.campaignName,
-    channelName: displayName(deal.channelName),
-    round: roundOf(deal.campaignName),
-    cost: deal.cost,
-    returnPct: deal.returnPct,
-    tier: invoiceTier(deal.returnPct),
-    amount: invoiceAmount(deal.cost, deal.returnPct) ?? 0,
-    status: maturity.status,
-    daysRemaining: maturity.daysRemaining,
-    invoiced,
-  };
+/**
+ * Media spend a campaign drove — the revenue people spent because of it:
+ * `returnPct × cost / 100` (a campaign's return is exactly media spend ÷ cost).
+ * Null until a return figure lands.
+ */
+export function mediaSpend(returnPct: number | null, cost: number | null): number | null {
+  if (returnPct === null || !Number.isFinite(returnPct)) return null;
+  if (cost === null || !Number.isFinite(cost)) return null;
+  return (returnPct * cost) / 100;
 }
 
 /**
- * Categorise the current deals against the saved invoice records into the
- * matured tier breakdown, the maturing early-invoice list, and top-ups due.
- * Keyed per campaign, so a creator's separate rounds bill independently.
+ * The batch's blended (spend-weighted) return — Σ media spend ÷ Σ cost × 100.
+ * Since each campaign's own return is media spend ÷ cost, blending over the
+ * month is just the cost-weighted average return. A member with no measured
+ * return yet still counts its cost in the denominator, dragging the blend down.
+ * This single number picks one commission tier for the whole batch. Null when
+ * Σ cost is zero.
  */
-export function buildInvoiceView(
+export function blendedReturn(
+  members: ReadonlyArray<{ cost: number; mediaSpend: number | null }>,
+): number | null {
+  let spend = 0;
+  let cost = 0;
+  for (const member of members) {
+    cost += member.cost;
+    spend += member.mediaSpend ?? 0;
+  }
+  return cost > 0 ? (spend / cost) * 100 : null;
+}
+
+/** A campaign inside a monthly batch, with whether it counts toward the bill. */
+export interface BatchMember {
+  /** Unique Almedia campaign name — the invoice identity. */
+  campaignName: string;
+  channelName: string;
+  round: number | null;
+  /** Almedia cost (USD) — invoiced up front in the publish month. */
+  cost: number;
+  /** INT price = Almedia cost ÷ 1.2 (USD). */
+  int: number;
+  /** Media spend the campaign drove = returnPct × cost ÷ 100 (USD); null until a return lands. */
+  mediaSpend: number | null;
+  /** This member's own return % (media spend ÷ cost × 100); null with no return yet. */
+  memberReturn: number | null;
+  /** The tier this member would earn on its own return — per-channel reference. */
+  ownTier: InvoiceTier;
+  status: MaturityStatus;
+  daysRemaining: number | null;
+  /** Publish month key this member belongs to, e.g. "2026-08". */
+  month: string;
+  /** Counted in the bill now — every matured member, plus any opted-in maturing one. */
+  included: boolean;
+  /** Stage 1: the Almedia cost billed up front in the publish month. */
+  baseAmount: number;
+  /**
+   * Stage 2: this member's share of the batch performance fee, billed the next
+   * calendar month — max(0, INT × (1 + batch commission) − cost). Zero for a
+   * member not counted in the batch, or when the batch sits at the base tier.
+   */
+  performanceFee: number;
+}
+
+/**
+ * One publish month's batch invoice. Stage 1 (cost up front) bills the raw
+ * Almedia cost of EVERY campaign published that month, regardless of maturity —
+ * the cost is known the moment it publishes. Stage 2 (performance fee) waits for
+ * the return: only matured (or opted-in) members set the blended return, which
+ * picks one commission tier, and the fee tops the matured cohort's already-billed
+ * cost up to Σ INT × (1 + commission). Strong performers carry the flops.
+ */
+export interface InvoiceBatch {
+  month: string;
+  label: string;
+  /** Every campaign published that month, largest cost first. */
+  members: BatchMember[];
+  /** Total campaigns published that month. */
+  memberCount: number;
+  /** Matured (or opted-in) channels — these set the blended return and the fee. */
+  includedCount: number;
+  /** Still-maturing channels available to opt into the fee blend. */
+  maturingCount: number;
+  /** Blended return = Σ media spend ÷ Σ cost × 100 across the included members. */
+  blendedReturn: number | null;
+  /** The single commission tier the fee bills at. */
+  tier: InvoiceTier;
+  /** Σ INT price (cost ÷ 1.2) across the included members — the fee basis. */
+  intTotal: number;
+  /** Stage 1: Σ Almedia cost of EVERY member — billed up front in the publish month. */
+  baseTotal: number;
+  /**
+   * Stage 2: the performance fee on the matured cohort — Σ INT × (1 + commission)
+   * − Σ cost — billed the next calendar month. Floored at 0: at the base 20% tier
+   * INT × 1.2 = cost, so nothing extra is billed.
+   */
+  performanceFee: number;
+  /** Total client bill for the month = baseTotal + performanceFee. */
+  amount: number;
+  /** The calendar month the performance fee is billed, e.g. publish "2026-06" → "2026-07". */
+  feeMonth: string;
+  /** The up-front cost for this publish month has already been invoiced. */
+  costInvoiced: boolean;
+  /** The whole cohort has matured, so the performance fee is final (not still moving). */
+  feeSettled: boolean;
+}
+
+/** The calendar month after a `YYYY-MM` key, e.g. "2026-12" → "2027-01". */
+function nextMonth(month: string): string {
+  const [year, index] = month.split("-").map(Number);
+  const rolled = index >= 12 ? { year: year + 1, index: 1 } : { year, index: index + 1 };
+  return `${rolled.year}-${String(rolled.index).padStart(2, "0")}`;
+}
+
+/** Round a dollar amount to cents; `|| 0` normalises a rounded −0 back to 0. */
+function toCents(value: number): number {
+  return Math.round(value * 100) / 100 || 0;
+}
+
+/**
+ * The Freecash client was invoiced the up-front cost (Stage 1 only, no
+ * performance fees) for every publish month through this key. Later months' cost
+ * and every month's performance fee are still outstanding.
+ */
+export const COST_INVOICED_THROUGH = "2026-06";
+
+/**
+ * Group eligible campaigns by publish month into batch invoices. INT is derived
+ * from the Almedia cost (cost ÷ 1.2), so every campaign with a cost is billable.
+ * Stage 1 (cost up front) counts EVERY member — cost is billed the month a
+ * campaign publishes, matured or not. Stage 2 (the fee) counts only matured
+ * members, plus any maturing one whose name is in `includedCampaigns`; opting one
+ * in re-blends the return and can move the fee tier. Most recent month first.
+ */
+export function buildInvoiceBatches(
   deals: Deal[],
-  records: InvoiceRecord[],
+  includedCampaigns: ReadonlySet<string> = new Set(),
   now: Date = new Date(),
-): InvoiceView {
-  const recordByKey = new Map(records.map((record) => [record.campaignName, record]));
-  const eligible = deals.filter(isEligible);
+): InvoiceBatch[] {
+  const byMonth = new Map<string, BatchMember[]>();
 
-  const matured: InvoiceLine[] = [];
-  const maturing: InvoiceLine[] = [];
-  const topUps: TopUpLine[] = [];
-
-  for (const deal of eligible) {
-    const record = recordByKey.get(deal.campaignName);
-    const line = toLine(deal, record !== undefined, now);
-
-    if (line.status === "matured") {
-      matured.push(line);
-      // Invoiced before maturity, then matured: charge the difference if it grew.
-      if (record && !record.maturedAtInvoice) {
-        const maturedTier = invoiceTier(deal.returnPct);
-        const topUp = Math.max(0, line.amount - record.amount);
-        const tierJumped = tierIndex(maturedTier.id) > tierIndex(record.tier);
-        if (topUp > 0 || tierJumped) {
-          topUps.push({
-            campaignName: deal.campaignName,
-            channelName: line.channelName,
-            round: line.round,
-            invoicedAmount: record.amount,
-            invoicedTier: (record.tier as InvoiceTierId) ?? "base",
-            maturedAmount: line.amount,
-            maturedTier: maturedTier.id,
-            topUp,
-            tierJumped,
-          });
-        }
-      }
-    } else {
-      maturing.push(line);
-    }
+  for (const deal of deals.filter(isEligible)) {
+    if (!deal.publishedAt) continue;
+    const month = deal.publishedAt.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    const maturity = getMaturityInfo(deal.publishedAt, now);
+    const int = intPrice(deal.cost);
+    const spend = mediaSpend(deal.returnPct, deal.cost);
+    const memberReturn = deal.returnPct;
+    const member: BatchMember = {
+      campaignName: deal.campaignName,
+      channelName: displayName(deal.channelName),
+      round: roundOf(deal.campaignName),
+      cost: deal.cost,
+      int,
+      mediaSpend: spend,
+      memberReturn,
+      ownTier: invoiceTier(memberReturn),
+      status: maturity.status,
+      daysRemaining: maturity.daysRemaining,
+      month,
+      included: maturity.status === "matured" || includedCampaigns.has(deal.campaignName),
+      baseAmount: deal.cost,
+      performanceFee: 0,
+    };
+    byMonth.set(month, [...(byMonth.get(month) ?? []), member]);
   }
 
-  matured.sort((a, b) => b.amount - a.amount);
-  maturing.sort((a, b) => b.amount - a.amount);
-  topUps.sort((a, b) => b.topUp - a.topUp);
+  // A member's performance fee: its full client charge (INT × (1 + commission))
+  // minus the cost already invoiced up front, floored at zero.
+  const memberFee = (int: number, cost: number, markup: number): number =>
+    toCents(Math.max(0, int * (1 + markup) - cost));
 
-  const tiers: TierSummary[] = INVOICE_TIERS.map((tier) => {
-    const rows = matured.filter((line) => line.tier.id === tier.id);
-    return {
-      tier,
-      count: rows.length,
-      base: rows.reduce((sum, line) => sum + line.cost, 0),
-      amount: rows.reduce((sum, line) => sum + line.amount, 0),
-    };
-  });
-
-  return {
-    tiers,
-    matured,
-    maturedTotal: matured.reduce((sum, line) => sum + line.amount, 0),
-    outstanding: matured.filter((line) => !line.invoiced).reduce((sum, line) => sum + line.amount, 0),
-    maturing,
-    topUps,
-    topUpTotal: topUps.reduce((sum, line) => sum + line.topUp, 0),
-  };
+  return [...byMonth.entries()]
+    .sort(([a], [b]) => b.localeCompare(a))
+    .map(([month, members]) => {
+      const included = members.filter((member) => member.included);
+      const blended = blendedReturn(included);
+      const tier = invoiceTier(blended);
+      const intTotal = included.reduce((sum, member) => sum + member.int, 0);
+      const includedCost = included.reduce((sum, member) => sum + member.cost, 0);
+      // Stage 1 bills the cost of every campaign published this month, matured or not.
+      const baseTotal = members.reduce((sum, member) => sum + member.cost, 0);
+      // Stage 2 tops the matured cohort's cost up to its full commissioned charge.
+      const performanceFee = toCents(Math.max(0, intTotal * (1 + tier.markup) - includedCost));
+      const maturingCount = members.filter((member) => member.status !== "matured").length;
+      const withFee = members.map((member) => ({
+        ...member,
+        performanceFee: member.included ? memberFee(member.int, member.cost, tier.markup) : 0,
+      }));
+      return {
+        month,
+        label: monthLabel(month),
+        members: withFee.sort((a, b) => b.cost - a.cost),
+        memberCount: members.length,
+        includedCount: included.length,
+        maturingCount,
+        blendedReturn: blended,
+        tier,
+        intTotal,
+        baseTotal,
+        performanceFee,
+        amount: baseTotal + performanceFee,
+        feeMonth: nextMonth(month),
+        costInvoiced: month <= COST_INVOICED_THROUGH,
+        feeSettled: maturingCount === 0,
+      };
+    });
 }

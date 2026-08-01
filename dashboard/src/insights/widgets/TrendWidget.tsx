@@ -56,6 +56,8 @@ export function TrendWidget({ deals }: { deals: Deal[] }) {
     .join(" ");
 
   const hundredY = geometry.y(100);
+  // Full-year labels ("Jul 2026") are wider, so thin them when months crowd.
+  const labelStride = Math.max(1, Math.ceil(points.length / 7));
 
   return (
     <>
@@ -117,18 +119,20 @@ export function TrendWidget({ deals }: { deals: Deal[] }) {
             </circle>
           ),
         )}
-        {/* month labels */}
-        {points.map((point, index) => (
-          <text
-            key={`label-${point.month}`}
-            className="scatter-axis"
-            x={geometry.x(index)}
-            y={H - 8}
-            textAnchor="middle"
-          >
-            {point.label}
-          </text>
-        ))}
+        {/* month labels (thinned when crowded so full-year labels don't overlap) */}
+        {points.map((point, index) =>
+          index % labelStride === 0 || index === points.length - 1 ? (
+            <text
+              key={`label-${point.month}`}
+              className="scatter-axis"
+              x={geometry.x(index)}
+              y={H - 8}
+              textAnchor="middle"
+            >
+              {point.label}
+            </text>
+          ) : null,
+        )}
       </svg>
       <p className="widget-footnote">
         Cost-weighted return per publish month · dashed line = 100% · columns = spend

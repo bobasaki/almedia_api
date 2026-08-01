@@ -22,6 +22,35 @@ function layoutKey(layouts: ResponsiveLayouts): string {
   return JSON.stringify(normalised);
 }
 
+/**
+ * Merge a saved layout with the current defaults so widgets added to the code
+ * after a layout was saved still appear. Saved positions win for widgets the
+ * user already arranged; any default widget missing from the saved set is
+ * appended below (never overlapping) so a new widget is never lost or crammed
+ * into a 1×1 cell by react-grid-layout's auto-placement.
+ */
+function mergeSavedWithDefaults(
+  defaults: ResponsiveLayouts,
+  saved: ResponsiveLayouts,
+): ResponsiveLayouts {
+  const merged: ResponsiveLayouts = { ...defaults };
+  for (const [breakpoint, savedItemsRaw] of Object.entries(saved)) {
+    const savedItems = savedItemsRaw ?? [];
+    const savedIds = new Set(savedItems.map((item) => item.i));
+    const defaultItems = (defaults as Record<string, Layout | undefined>)[breakpoint] ?? [];
+    let nextY = savedItems.reduce((max, item) => Math.max(max, item.y + item.h), 0);
+    const appended = defaultItems
+      .filter((item) => !savedIds.has(item.i))
+      .map((item) => {
+        const placed = { ...item, x: 0, y: nextY };
+        nextY += item.h;
+        return placed;
+      });
+    (merged as Record<string, Layout>)[breakpoint] = [...savedItems, ...appended];
+  }
+  return merged;
+}
+
 interface DashboardLayout {
   layouts: ResponsiveLayouts;
   onLayoutChange: (current: Layout, all: ResponsiveLayouts) => void;
@@ -43,7 +72,7 @@ export function useDashboardLayout(profile: string, defaults: ResponsiveLayouts)
       .then((response) => response.json() as Promise<{ layout?: ResponsiveLayouts | null }>)
       .then((body) => {
         if (body.layout && typeof body.layout === "object") {
-          const merged = { ...defaults, ...body.layout };
+          const merged = mergeSavedWithDefaults(defaults, body.layout);
           setLayouts(merged);
           latest.current = merged;
         }

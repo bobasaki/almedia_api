@@ -10,6 +10,12 @@ interface ActionPlanWidgetProps {
 
 const SECTIONS = [
   {
+    title: "Booking targets",
+    hint: "Exact 'book more X' calls for CMs",
+    prompt:
+      "Write a BOOKING TARGETS section: concrete, quotable instructions a CM can act on this week. Do not use em dashes. Using only matured segment performance and the creator enrichment in the snapshot, produce up to 6 bullets in the imperative form 'Book more <niche/market/platform>, <supporting number>' and, where enrichment supports it, 'Book channels averaging ~<views> typical views at <ER>% engagement (that profile returned <return%>)'. Every bullet must cite a real number from the data. Skip any claim the snapshot can't support.",
+  },
+  {
     title: "Focus",
     hint: "Markets & verticals to prioritise next month",
     prompt:
@@ -63,7 +69,7 @@ export function ActionPlanWidget({ onAsk, aiReady }: ActionPlanWidgetProps) {
         ))}
       </ol>
       <p className="widget-footnote">
-        Kept as a template on purpose — generate each section with the analyst against the data
+        Kept as a template on purpose. Generate each section with the analyst against the data
         currently in view, then edit before sharing.
       </p>
     </>

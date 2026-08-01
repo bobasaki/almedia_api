@@ -1,3 +1,4 @@
+import { monthLabel } from "./labels";
 import type { Campaign, CampaignFilters } from "./types";
 
 export const RETURN_TIERS = [
@@ -133,11 +134,7 @@ export function monthlyPerformance(campaigns: Campaign[]): MonthlyPerformance[] 
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, rows]) => ({
       key,
-      label: new Intl.DateTimeFormat("en", {
-        month: "short",
-        year: "2-digit",
-        timeZone: "UTC",
-      }).format(new Date(`${key}-01T00:00:00Z`)),
+      label: monthLabel(key),
       cost: sum(rows, "cost"),
       roas: weightedAverage(rows, "roasReturn", "cost"),
       campaigns: rows.length,

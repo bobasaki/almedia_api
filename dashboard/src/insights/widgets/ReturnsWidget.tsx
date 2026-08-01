@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { platformLabel } from "../../labels";
 import { groupByDimension } from "../enrich";
 import { formatEur, formatPct } from "../format";
 import type { Deal, DimensionId } from "../types";
@@ -30,7 +31,7 @@ export function ReturnsWidget({ deals }: { deals: Deal[] }) {
         .filter((group) => group.avgReturnPct !== null)
         .sort((a, b) => (b.avgReturnPct ?? 0) - (a.avgReturnPct ?? 0))
         .map((group) => ({
-          key: group.key,
+          key: dimension === "platform" ? platformLabel(group.key) : group.key,
           value: group.avgReturnPct,
           display: formatPct(group.avgReturnPct),
           meta: `${group.measured} measured · ${formatEur(group.cost)}`,

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { unitEconomics } from "../charts";
-import { formatCount, formatEur, formatPct } from "../format";
+import { formatCount, formatEur, formatMoney, formatPct } from "../format";
 import type { Deal } from "../types";
 
 /**
@@ -25,7 +25,7 @@ export function UnitEconomicsWidget({ deals }: { deals: Deal[] }) {
 
   return (
     <>
-      <p className="widget-subheading">CPM — priced vs delivered</p>
+      <p className="widget-subheading">CPM · priced vs delivered</p>
       <ul className="bar-list">
         {cpmBars.map((bar) => (
           <li key={bar.label} className="bar-row">
@@ -59,6 +59,10 @@ export function UnitEconomicsWidget({ deals }: { deals: Deal[] }) {
         <div className="stat">
           <span>D7 purchases</span>
           <strong>{formatCount(metrics.d7Purchases)}</strong>
+        </div>
+        <div className="stat">
+          <span>APPU · D14</span>
+          <strong>{formatMoney(metrics.appuD14)}</strong>
         </div>
       </div>
       <p className="widget-footnote">

@@ -594,6 +594,72 @@ footer { width: min(1400px, calc(100% - 48px)); margin: 0 auto; padding: 0 0 30p
   white-space: nowrap;
 }
 
+/* ---- Info tips ("i" explanations) ---- */
+.info-tip { position: relative; display: inline-flex; }
+.info-tip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-family: var(--font-display, serif);
+  font-size: 12px;
+  font-style: italic;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+.info-tip-trigger::-webkit-details-marker { display: none; }
+.info-tip-trigger::marker { content: ""; }
+.info-tip-trigger:hover,
+.info-tip[open] .info-tip-trigger {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.info-tip-trigger:focus-visible {
+  outline: 2px solid var(--focus, var(--primary));
+  outline-offset: 2px;
+}
+.info-tip-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  width: max-content;
+  max-width: min(320px, 78vw);
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--shadow, 0 18px 50px rgba(12, 15, 69, 0.16));
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.55;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  cursor: default;
+}
+.info-tip-end .info-tip-panel { right: 0; }
+.info-tip-start .info-tip-panel { left: 0; }
+.info-tip-panel strong { color: var(--text, var(--primary)); font-weight: 750; }
+.info-tip-panel p { margin: 0 0 8px; }
+.info-tip-panel p:last-child { margin-bottom: 0; }
+.info-tip-panel ul { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 4px; }
+.info-tip-panel li { margin: 0; }
+.info-tip-panel .info-tip-term { color: var(--text, var(--primary)); font-weight: 700; }
+
+/* Info tip sitting inside a hero heading row. */
+.hero-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.hero-title-row .info-tip { align-self: center; }
+
 /* ---- Booking statuses ---- */
 
 .status-pipeline { --status-color: var(--muted); --status-soft: var(--surface-soft); }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { Scorecard, ScorecardRow, TierCounts } from "../../../src/bookings/scorecard";
+import { InfoTip } from "../InfoTip";
 import { fetchScorecard } from "./api";
 import { currentIsoMonth, formatEurCompact, formatMonth, formatPercent } from "./format";
 
@@ -110,7 +111,39 @@ export function ScorecardView() {
       <section className="hero">
         <div>
           <p className="eyebrow">Plan vs booked</p>
-          <h1>Are we on pace?</h1>
+          <div className="hero-title-row">
+            <h1>Are we on pace?</h1>
+            <InfoTip label="What the Scorecard page shows" align="start">
+              <p>
+                <strong>Committed budget against the plan</strong> for every CM, market, and month.
+                This is the replacement for the sheet's Dashboard tab. It answers one question: are we
+                on track to hit target?
+              </p>
+              <ul>
+                <li>
+                  <span className="info-tip-term">Month cards</span>: booked vs target for each month,
+                  with a progress bar and pace badge.
+                </li>
+                <li>
+                  <span className="info-tip-term">Utilisation</span>: booked ÷ target. 100% means the
+                  target is met.
+                </li>
+                <li>
+                  <span className="info-tip-term">Pace</span>: progress against where we should be by
+                  now. "Behind" means catch-up is needed.
+                </li>
+                <li>
+                  <span className="info-tip-term">Deal sizes</span>: booked vs planned across the deal
+                  size tiers (under 10k up to 50k+).
+                </li>
+                <li>
+                  <span className="info-tip-term">Committed</span> is booked plus published plus
+                  longterm. <span className="info-tip-term">Dropout</span> is the share of deals that
+                  fell through.
+                </li>
+              </ul>
+            </InfoTip>
+          </div>
           <p className="hero-copy">
             Committed budget (booked, published, longterm) against each CM's monthly plan target.
           </p>
@@ -138,7 +171,7 @@ export function ScorecardView() {
           );
         })}
         {scorecard?.months.length === 0 && (
-          <p className="table-empty">No targets or dated bookings yet — seed targets or add deals first.</p>
+          <p className="table-empty">No targets or dated bookings yet. Seed targets or add deals first.</p>
         )}
       </section>
 

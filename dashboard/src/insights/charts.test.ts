@@ -28,6 +28,7 @@ function deal(overrides: Partial<Deal>): Deal {
     signupsPct: 0.02,
     d7Purchases: 100,
     roasReturn: 0.9,
+    appuD14: null,
     expectedViews: 50_000,
     deliveryPct: 100,
     cm: "Lucija P",
@@ -117,6 +118,20 @@ describe("unitEconomics", () => {
     expect(metrics.views).toBe(0);
     expect(metrics.realisedCpm).toBeNull();
     expect(metrics.costPerSignup).toBeNull();
+  });
+
+  it("weights APPU by the users behind each campaign (modeled signups)", () => {
+    // Campaign A: 50000 * 0.02 = 1000 users, APPU 2; B: 100000 * 0.03 = 3000 users, APPU 6.
+    // Weighted APPU = (2*1000 + 6*3000) / 4000 = 20000/4000 = 5.
+    const metrics = unitEconomics([
+      deal({ viewCount: 50_000, signupsPct: 0.02, appuD14: 2 }),
+      deal({ viewCount: 100_000, signupsPct: 0.03, appuD14: 6 }),
+    ]);
+    expect(metrics.appuD14).toBeCloseTo(5, 6);
+  });
+
+  it("returns a null APPU when no campaign carries one", () => {
+    expect(unitEconomics([deal({ appuD14: null })]).appuD14).toBeNull();
   });
 });
 

@@ -1,5 +1,7 @@
 import { forwardRef, type CSSProperties, type ReactNode } from "react";
 
+import { InfoTip } from "../InfoTip";
+
 /**
  * A card on the responsive insights grid. react-grid-layout drives position
  * and size by cloning this element and injecting `style`, `className`, drag
@@ -11,6 +13,8 @@ import { forwardRef, type CSSProperties, type ReactNode } from "react";
 interface GridWidgetProps {
   title: string;
   eyebrow?: string;
+  /** Plain-language explanation of what this widget shows. */
+  info?: ReactNode;
   headerExtra?: ReactNode;
   body: ReactNode;
   // Injected by react-grid-layout onto the grid item's child:
@@ -20,7 +24,7 @@ interface GridWidgetProps {
 }
 
 export const GridWidget = forwardRef<HTMLDivElement, GridWidgetProps>(function GridWidget(
-  { title, eyebrow, headerExtra, body, className, style, children, ...rest },
+  { title, eyebrow, info, headerExtra, body, className, style, children, ...rest },
   ref,
 ) {
   return (
@@ -37,6 +41,11 @@ export const GridWidget = forwardRef<HTMLDivElement, GridWidgetProps>(function G
           {eyebrow && <p className="eyebrow">{eyebrow}</p>}
           <h2>{title}</h2>
         </div>
+        {info && (
+          <div className="widget-header-extra">
+            <InfoTip label={`What "${title}" shows`}>{info}</InfoTip>
+          </div>
+        )}
         {headerExtra && <div className="widget-header-extra">{headerExtra}</div>}
         <span className="drag-hint" aria-hidden="true">
           ⠿

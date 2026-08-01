@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { Booking, BookingStatus, Target } from "../../../src/bookings/types";
 import { BOOKING_STATUSES } from "../../../src/bookings/types";
+import { InfoTip } from "../InfoTip";
 import { deleteBooking, fetchBookings, fetchTargets, patchBooking } from "./api";
 import { BookingForm } from "./BookingForm";
 import { formatEur, formatMonth, STATUS_LABELS } from "./format";
@@ -141,9 +142,37 @@ export function BookingsView() {
       <section className="hero">
         <div>
           <p className="eyebrow">Booking pipeline</p>
-          <h1>Every deal, one table.</h1>
+          <div className="hero-title-row">
+            <h1>Every deal, one table.</h1>
+            <InfoTip label="What the Bookings page shows" align="start">
+              <p>
+                <strong>The deal pipeline.</strong> The tracker sheet's Campaigns, Longterm, and
+                Dropouts tabs in one table, with a status on each row.
+              </p>
+              <ul>
+                <li>
+                  <span className="info-tip-term">Status chips</span>: counts per stage, click to
+                  filter. A deal moves from <em>pipeline</em> to <em>booked</em> to <em>published</em>{" "}
+                  to <em>longterm</em>, or is <em>dropped</em>.
+                </li>
+                <li>
+                  <span className="info-tip-term">Add form</span>: log a new deal. The INT budget sets
+                  the EXT price automatically.
+                </li>
+                <li>
+                  <span className="info-tip-term">INT vs EXT</span>: INT is our internal booked budget;
+                  EXT is the client-facing price (INT ÷ 0.8).
+                </li>
+                <li>
+                  <span className="info-tip-term">Activation</span>: the offer or mechanic booked, with
+                  how many activations.
+                </li>
+              </ul>
+              <p>Committed budget is booked plus published plus longterm. Dropped deals don't count.</p>
+            </InfoTip>
+          </div>
           <p className="hero-copy">
-            Scout, book, publish, and track dropouts — the tracker sheet workflow without the sheet.
+            Scout, book, publish, and track dropouts. The tracker sheet workflow without the sheet.
           </p>
         </div>
         <div className="record-count">
@@ -273,7 +302,7 @@ export function BookingsView() {
           {filtered.length === 0 && (
             <p className="table-empty">
               {bookings?.length === 0
-                ? "No deals yet — add the first one above."
+                ? "No deals yet. Add the first one above."
                 : "No deals match the current filters."}
             </p>
           )}

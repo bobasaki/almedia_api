@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { platformLabel } from "../../labels";
 import { crossTab, type HeatCell } from "../charts";
 import { formatEur, formatPct } from "../format";
 import type { DimensionId } from "../types";
@@ -38,6 +39,9 @@ export function HeatmapWidget({ deals }: { deals: Deal[] }) {
   const rows = table.rows.slice(0, 8);
   const cols = table.cols.slice(0, 8);
 
+  const rowText = (value: string) => (rowDim === "platform" ? platformLabel(value) : value);
+  const colText = (value: string) => (colDim === "platform" ? platformLabel(value) : value);
+
   return (
     <>
       <div className="widget-controls">
@@ -73,7 +77,7 @@ export function HeatmapWidget({ deals }: { deals: Deal[] }) {
                 <th aria-hidden="true" />
                 {cols.map((col) => (
                   <th key={col} scope="col">
-                    {col}
+                    {colText(col)}
                   </th>
                 ))}
               </tr>
@@ -81,7 +85,7 @@ export function HeatmapWidget({ deals }: { deals: Deal[] }) {
             <tbody>
               {rows.map((row) => (
                 <tr key={row}>
-                  <th scope="row">{row}</th>
+                  <th scope="row">{rowText(row)}</th>
                   {cols.map((col) => {
                     const cell = byKey.get(`${row}|${col}`);
                     if (!cell) return <td key={col} className="heat-cell empty" />;
@@ -89,7 +93,7 @@ export function HeatmapWidget({ deals }: { deals: Deal[] }) {
                       <td
                         key={col}
                         className={`heat-cell tone-${toneOf(cell)}`}
-                        title={`${row} · ${col}\n${formatPct(cell.avgReturnPct)} return · ${formatEur(
+                        title={`${rowText(row)} · ${colText(col)}\n${formatPct(cell.avgReturnPct)} return · ${formatEur(
                           cell.cost,
                         )} · ${cell.deals} deals`}
                       >

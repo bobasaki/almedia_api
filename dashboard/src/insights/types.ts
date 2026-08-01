@@ -29,6 +29,8 @@ export interface Deal {
   signupsPct: number | null;
   d7Purchases: number | null;
   roasReturn: number | null;
+  /** Average payment per user by day 14 (APPU) — spend quality of acquired users. */
+  appuD14: number | null;
   /** cost / expectedCpm × 1000 — the views the price was based on. */
   expectedViews: number | null;
   /** viewCount / expectedViews × 100. */

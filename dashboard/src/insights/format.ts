@@ -9,6 +9,27 @@ export function formatEur(value: number | null): string {
   }).format(value);
 }
 
+/** USD whole-dollar amounts — Almedia costs and the invoicing model are in dollars. */
+export function formatUsd(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "–";
+  return new Intl.NumberFormat("en", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+/** Precise EUR with cents — for small per-user values like APPU. */
+export function formatMoney(value: number | null, digits = 2): string {
+  if (value === null || !Number.isFinite(value)) return "–";
+  return new Intl.NumberFormat("en", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
 export function formatCount(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "–";
   if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;

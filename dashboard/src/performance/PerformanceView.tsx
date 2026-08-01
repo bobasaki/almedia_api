@@ -12,6 +12,8 @@ import {
   weightedAverage,
   type MonthlyPerformance,
 } from "../analytics";
+import { InfoTip } from "../InfoTip";
+import { platformLabel } from "../labels";
 import type { Campaign, CampaignFilters, CampaignPayload } from "../types";
 import type { StoredChannelEnrichment } from "../../../src/enrichment/types";
 import { deriveVerticals } from "./verticals";
@@ -57,10 +59,6 @@ function formatMetric(
   if (kind === "return") return `${decimalNumber.format(value)}%`;
   if (kind === "roas") return `${decimalNumber.format(value)}×`;
   return wholeNumber.format(value);
-}
-
-function platformLabel(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function KpiCard({
@@ -743,7 +741,43 @@ export function PerformanceView() {
       <section className="hero">
         <div>
           <p className="eyebrow">Performance overview</p>
-          <h1>Your campaigns, clearly measured.</h1>
+          <div className="hero-title-row">
+            <h1>Your campaigns, clearly measured.</h1>
+            <InfoTip label="What the Performance page shows" align="start">
+              <p>
+                <strong>The raw, per-campaign record</strong> from Almedia: every published campaign
+                with its full metric set. Where Insights aggregates, this is the drill-down.
+              </p>
+              <ul>
+                <li>
+                  <span className="info-tip-term">Filters</span>: narrow by platform, country, return
+                  tier, maturity, or date. Everything below reacts.
+                </li>
+                <li>
+                  <span className="info-tip-term">KPI cards</span>: total cost, views, D7 purchases,
+                  and cost-weighted lifetime ROAS for the selection.
+                </li>
+                <li>
+                  <span className="info-tip-term">Return action tiers</span>: campaigns grouped into
+                  longterm, rebook, adjust, and drop. Click a tier to filter.
+                </li>
+                <li>
+                  <span className="info-tip-term">Charts</span>: monthly cost and ROAS trend, and a
+                  by-platform mix.
+                </li>
+                <li>
+                  <span className="info-tip-term">Table</span>: every field per campaign. Click a row
+                  for the full record and creator enrichment.
+                </li>
+              </ul>
+              <p>
+                Key metrics. <span className="info-tip-term">Return %</span> is revenue vs cost;
+                <span className="info-tip-term"> ROAS</span> is return on ad spend (×);
+                <span className="info-tip-term"> APPU D14</span> is the average payment per user by day
+                14.
+              </p>
+            </InfoTip>
+          </div>
           <p className="hero-copy">Track investment, reach, purchases, and return across every publishing platform.</p>
         </div>
         <div className="hero-side">
@@ -823,7 +857,25 @@ export function PerformanceView() {
 
       <section className="panel tier-panel" aria-labelledby="return-tier-heading">
         <div className="panel-heading">
-          <div><p className="eyebrow">Decision view</p><h2 id="return-tier-heading">Return action tiers</h2></div>
+          <div>
+            <p className="eyebrow">Decision view</p>
+            <div className="hero-title-row">
+              <h2 id="return-tier-heading">Return action tiers</h2>
+              <InfoTip label="What the return action tiers mean" align="start">
+                <p>
+                  Every measured campaign falls into one <strong>action group</strong> based on its
+                  return %, so the next step is clear:
+                </p>
+                <ul>
+                  <li><span className="info-tip-term">Longterm</span> (over 100%): it more than paid back. Extend or make it a longterm deal.</li>
+                  <li><span className="info-tip-term">Rebooking</span> (80 to 100%): solid, rebook as is.</li>
+                  <li><span className="info-tip-term">Price adjusted</span> (50 to 80%): only rebook after renegotiating the price down.</li>
+                  <li><span className="info-tip-term">Drop</span> (under 50%): underperformed, drop or replace.</li>
+                </ul>
+                <p>Click any tier to filter the whole page to it.</p>
+              </InfoTip>
+            </div>
+          </div>
           <p className="tier-note">
             {filters.returnTier === "all"
               ? "Select a tier to filter the dashboard"

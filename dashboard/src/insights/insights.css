@@ -4,7 +4,10 @@
   grid-template-columns: repeat(8, minmax(0, 1fr)) auto;
 }
 
-.insights-kpis { margin-bottom: 24px; }
+.insights-kpis {
+  margin-bottom: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
 
 .vertical-insights-panel { margin-bottom: 24px; padding: 22px; }
 .vertical-insights-header {
@@ -60,6 +63,10 @@
   overflow: hidden;
   height: 100%;
 }
+/* Let an open info-tip escape the widget's clip so its panel is never cut off. */
+.grid-widget:has(.info-tip[open]) { overflow: visible; z-index: 6; }
+.widget-header .info-tip { cursor: default; }
+.widget-header .info-tip-panel { z-index: 45; }
 
 /* react-grid-layout drag placeholder + smoother item transitions */
 .react-grid-item.react-grid-placeholder {
@@ -349,6 +356,45 @@
 }
 .stat span { color: var(--muted); font-size: 11px; font-weight: 600; }
 .stat strong { font-size: 17px; letter-spacing: -0.02em; }
+
+/* ---- Booking suggestions ---- */
+.suggestion-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.suggestion-item {
+  padding: 11px 13px 11px 15px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+.suggestion-item.tone-edge-good { border-left-color: var(--tier-longterm); }
+.suggestion-item.tone-edge-neutral { border-left-color: var(--tier-rebooking); }
+.suggestion-item.tone-edge-bad { border-left-color: var(--tier-drop); }
+.suggestion-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.suggestion-head strong { font-size: 14px; letter-spacing: -0.01em; }
+.suggestion-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.suggestion-tag.tone-good { color: var(--tier-longterm); border-color: var(--tier-longterm-soft); background: var(--tier-longterm-soft); }
+.suggestion-tag.tone-neutral { color: var(--tier-rebooking); border-color: var(--tier-rebooking-soft); background: var(--tier-rebooking-soft); }
+.suggestion-tag.tone-bad { color: var(--tier-drop); border-color: var(--tier-drop-soft); background: var(--tier-drop-soft); }
+.suggestion-item p { margin: 6px 0 8px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.suggestion-metric {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.suggestion-actions { margin-top: 12px; }
 
 /* ---- Invoice card ---- */
 

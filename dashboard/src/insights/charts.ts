@@ -1,4 +1,5 @@
 import { getMaturityInfo } from "../analytics";
+import { monthLabel } from "../labels";
 import { dimensionValues } from "./enrich";
 import type { Deal, DimensionId } from "./types";
 
@@ -80,7 +81,28 @@ export interface UnitEconomics {
   signupRate: number | null;
   costPerSignup: number | null;
   costPerPurchase: number | null;
+  /** Average payment per user by D14, weighted by acquired users (modeled signups). */
+  appuD14: number | null;
   measuredCampaigns: number;
+}
+
+/**
+ * APPU (average payment per user) weighted by the users behind each campaign.
+ * Modeled signups (views × signupsPct) are the best available user-count proxy;
+ * when a campaign lacks them we fall back to counting it as one observation so a
+ * single APPU value still contributes. Returns null when nothing carries APPU.
+ */
+export function weightedAppu(deals: Deal[]): number | null {
+  let weighted = 0;
+  let weight = 0;
+  for (const deal of deals) {
+    if (deal.appuD14 === null || !Number.isFinite(deal.appuD14)) continue;
+    const users = signupsOf(deal);
+    const w = users !== null && users > 0 ? users : 1;
+    weighted += deal.appuD14 * w;
+    weight += w;
+  }
+  return weight > 0 ? weighted / weight : null;
 }
 
 /** signupsPct is a view→signup rate (fraction); absolute signups = views × rate. */
@@ -130,6 +152,7 @@ export function unitEconomics(deals: Deal[]): UnitEconomics {
     signupRate: ratio(signups, signupViews),
     costPerSignup: ratio(costOf(signupCohort), signups),
     costPerPurchase: ratio(costOf(purchaseCohort), purchases),
+    appuD14: weightedAppu(withCampaign),
     measuredCampaigns: viewCohort.length,
   };
 }
@@ -297,22 +320,12 @@ export function efficiencyPoints(deals: Deal[]): ScatterPoint[] {
 export interface TrendPoint {
   /** YYYY-MM. */
   month: string;
-  /** "Jul 26". */
+  /** "Jul 2026" — full year so it never reads as a day. */
   label: string;
   cost: number;
   avgReturnPct: number | null;
   deals: number;
   measured: number;
-}
-
-function monthLabel(month: string): string {
-  const parsed = new Date(`${month}-01T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return month;
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    year: "2-digit",
-    timeZone: "UTC",
-  }).format(parsed);
 }
 
 /**

@@ -34,7 +34,7 @@ export function PainPointsWidget({ deals }: { deals: Deal[] }) {
       </div>
       {visible.length === 0 ? (
         <p className="widget-empty">
-          No pain points detected here — either healthy, or not enough measured deals yet.
+          No pain points detected here. Either healthy, or not enough measured deals yet.
         </p>
       ) : (
         <ul className="pain-list">
