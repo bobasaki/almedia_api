@@ -1,27 +1,29 @@
 import { useMemo, useState } from "react";
 
 import { InfoTip } from "../InfoTip";
-import { dimensionOptions, filterDeals } from "../insights/enrich";
 import { formatPct, formatUsd, timeAgo } from "../insights/format";
 import "../insights/insights.css";
 import {
   buildInvoiceBatches,
+  buildInvoiceMonths,
+  prevMonth,
   COST_INVOICED_THROUGH,
   type BatchMember,
   type InvoiceBatch,
+  type InvoiceMonth,
 } from "../insights/invoicing";
 import { monthLabel } from "../labels";
-import type { InsightFilters } from "../insights/types";
-import { ALL_FILTERS } from "../insights/types";
 import { useDealsData } from "../insights/useDealsData";
 import "./invoices.css";
 
 /**
- * Invoices — a standalone billing view. Campaigns are grouped by publish month.
- * Stage 1 (cost) is invoiced up front the month a campaign publishes; Stage 2
- * (performance fee) is billed the next month, once the batch's blended return
- * settles. The Freecash client is already invoiced for cost through
- * COST_INVOICED_THROUGH (no fees yet), so the view foregrounds what is still due.
+ * Invoices — a standalone billing view. The money that lands on any single
+ * calendar month's invoice comes from two different publish batches: THIS
+ * month's cost plus LAST month's performance fee. The view leads with an
+ * invoice-month lens (e.g. the July invoice = July cost + June fee) and keeps a
+ * per-publish-month accordion below for the campaign-level detail. The Freecash
+ * client is already invoiced for cost through COST_INVOICED_THROUGH (no fees
+ * yet), so the view foregrounds what is still due.
  */
 
 function markupLabel(markup: number): string {
@@ -29,6 +31,78 @@ function markupLabel(markup: number): string {
 }
 
 const INVOICED_LABEL = monthLabel(COST_INVOICED_THROUGH);
+
+/**
+ * One calendar month's invoice, split into its two components: cost from
+ * campaigns published this month, and the performance fee carried from last
+ * month's batch. This is the answer to "how much do I invoice in July, and how
+ * much of it is June's fee".
+ */
+function InvoiceMonthCard({ month: m }: { month: InvoiceMonth }) {
+  const feeFrom = m.feeBatch?.label ?? monthLabel(prevMonth(m.month));
+  const hasFee = m.feeBatch !== null && (m.carriedFee > 0 || m.feePending > 0);
+  return (
+    <article className="im-card">
+      <header className="im-card-head">
+        <span className="im-card-month">{m.label}</span>
+        <span className="im-card-total">{formatUsd(m.total)}</span>
+      </header>
+      <dl className="im-lines">
+        <div className="im-line">
+          <dt>
+            <span className="im-line-title">New cost</span>
+            <span className="im-line-note">
+              {m.costBatch ? `from campaigns published in ${m.label}` : "no campaigns published"}
+            </span>
+          </dt>
+          <dd>
+            <span className="im-line-amt">{formatUsd(m.newCost)}</span>
+            {m.costBatch ? (
+              m.costInvoiced ? (
+                <span className="chip chip-done">✓ invoiced</span>
+              ) : (
+                <span className="chip chip-due">due</span>
+              )
+            ) : null}
+          </dd>
+        </div>
+        <div className="im-line">
+          <dt>
+            <span className="im-line-title">Performance fee</span>
+            <span className="im-line-note">carried from {feeFrom}</span>
+          </dt>
+          <dd>
+            {!hasFee ? (
+              <>
+                <span className="im-line-amt is-zero">{formatUsd(0)}</span>
+                <span className="chip chip-none">no fee</span>
+              </>
+            ) : !m.feeSettled ? (
+              <>
+                <span className="im-line-amt">~{formatUsd(m.feePending)}</span>
+                <span className="chip chip-pending">maturing</span>
+              </>
+            ) : m.carriedFee > 0 ? (
+              <>
+                <span className="im-line-amt">{formatUsd(m.carriedFee)}</span>
+                <span className="chip chip-fee">due</span>
+              </>
+            ) : (
+              <>
+                <span className="im-line-amt is-zero">{formatUsd(0)}</span>
+                <span className="chip chip-none">no fee</span>
+              </>
+            )}
+          </dd>
+        </div>
+      </dl>
+      <footer className="im-card-foot">
+        <span>To invoice in {m.label}</span>
+        <strong>{formatUsd(m.total)}</strong>
+      </footer>
+    </article>
+  );
+}
 
 function BatchMemberRow({
   member,
@@ -114,24 +188,24 @@ function MonthRow({
       <div className="month-body">
         <p className="batch-stages">
           <span>
-            <strong>Stage 1 · Cost</strong> {formatUsd(batch.baseTotal)} —{" "}
+            <strong>Stage 1 · Cost</strong> {formatUsd(batch.baseTotal)},{" "}
             {batch.costInvoiced ? (
               <span className="tone-text-good">invoiced in {batch.label}</span>
             ) : (
-              <span className="tone-text-bad">due in {batch.label}</span>
+              <span className="tone-text-bad">due on the {batch.label} invoice</span>
             )}
           </span>
           <span>
             <strong>Stage 2 · Performance fee</strong>{" "}
             {!batch.feeSettled ? (
-              <>pending — cohort still maturing ({batch.maturingCount} to go)</>
+              <>pending, cohort still maturing ({batch.maturingCount} to go)</>
             ) : batch.performanceFee > 0 ? (
               <>
-                <span className="tone-text-good">+{formatUsd(batch.performanceFee)}</span> due in{" "}
-                {monthLabel(batch.feeMonth)}
+                <span className="tone-text-good">+{formatUsd(batch.performanceFee)}</span>, lands on
+                the {monthLabel(batch.feeMonth)} invoice
               </>
             ) : (
-              <>none — blended return under 100%</>
+              <>none, blended return under 100%</>
             )}
           </span>
         </p>
@@ -154,43 +228,54 @@ export function InvoicesView() {
   const [month, setMonth] = useState<string>("all");
   const [includedCampaigns, setIncludedCampaigns] = useState<ReadonlySet<string>>(new Set());
 
-  const filters: InsightFilters = useMemo(() => ({ ...ALL_FILTERS, month }), [month]);
-  const filtered = useMemo(() => filterDeals(data.deals, filters), [data.deals, filters]);
-  const monthOptions = useMemo(() => dimensionOptions(data.deals).month, [data.deals]);
-  const batches = useMemo(
-    () => buildInvoiceBatches(filtered, includedCampaigns),
-    [filtered, includedCampaigns],
+  // Batches are built from every deal so each fee cohort is complete; the month
+  // filter narrows the display, never the fee math.
+  const allBatches = useMemo(
+    () => buildInvoiceBatches(data.deals, includedCampaigns),
+    [data.deals, includedCampaigns],
   );
+  const invoiceMonths = useMemo(() => buildInvoiceMonths(allBatches), [allBatches]);
+  const monthOptions = useMemo(() => invoiceMonths.map((entry) => entry.month), [invoiceMonths]);
+
+  const selectedLabel = month === "all" ? null : monthLabel(month);
+
+  // The month filter is the calendar INVOICE month. Selecting July shows the July
+  // invoice-month card, and the two publish batches feeding it: July (cost) and
+  // June (fee).
+  const visibleMonths = useMemo(
+    () => (month === "all" ? invoiceMonths : invoiceMonths.filter((entry) => entry.month === month)),
+    [invoiceMonths, month],
+  );
+  const visibleBatches = useMemo(() => {
+    if (month === "all") return allBatches;
+    const keep = new Set([month, prevMonth(month)]);
+    return allBatches.filter((batch) => keep.has(batch.month));
+  }, [allBatches, month]);
 
   const totals = useMemo(() => {
     let costDue = 0;
     let costInvoiced = 0;
     let feesDue = 0;
     let feesPending = 0;
-    let campaigns = 0;
-    for (const batch of batches) {
-      campaigns += batch.memberCount;
-      if (batch.costInvoiced) costInvoiced += batch.baseTotal;
-      else costDue += batch.baseTotal;
-      if (batch.feeSettled) feesDue += batch.performanceFee;
-      else feesPending += batch.performanceFee;
+    for (const entry of visibleMonths) {
+      if (entry.costInvoiced) costInvoiced += entry.newCost;
+      else costDue += entry.newCost;
+      feesDue += entry.carriedFee;
+      feesPending += entry.feePending;
     }
-    return {
-      costDue,
-      costInvoiced,
-      feesDue,
-      feesPending,
-      campaigns,
-      dueNow: costDue + feesDue,
-      costAll: costDue + costInvoiced,
-    };
-  }, [batches]);
+    return { costDue, costInvoiced, feesDue, feesPending, dueNow: costDue + feesDue };
+  }, [visibleMonths]);
+
+  const campaignCount = useMemo(
+    () => visibleBatches.reduce((sum, batch) => sum + batch.memberCount, 0),
+    [visibleBatches],
+  );
 
   // Campaigns with a cost but no publish date can't be placed in a month.
   const undated = useMemo(() => {
     let cost = 0;
     let count = 0;
-    for (const deal of filtered) {
+    for (const deal of data.deals) {
       if (deal.cost === null || !Number.isFinite(deal.cost) || deal.cost <= 0) continue;
       const key = deal.publishedAt?.slice(0, 7);
       if (!key || !/^\d{4}-\d{2}$/.test(key)) {
@@ -199,7 +284,7 @@ export function InvoicesView() {
       }
     }
     return { cost, count };
-  }, [filtered]);
+  }, [data.deals]);
 
   const toggleInclude = (member: BatchMember) => {
     if (member.status === "matured") return; // matured channels always count toward the fee
@@ -230,22 +315,22 @@ export function InvoicesView() {
             <h1>Invoices</h1>
             <InfoTip label="How invoicing works" align="start">
               <p>
-                <strong>Two stages per campaign, both in USD.</strong> Grouped by the month a
-                campaign published.
+                <strong>Each calendar month's invoice has two parts, both in USD.</strong> A campaign
+                is billed across two months, so any single invoice mixes two batches.
               </p>
               <ul>
                 <li>
-                  <span className="info-tip-term">Stage 1 · Cost</span> — the raw Almedia cost,
-                  invoiced up front the month it publishes (matured or not).
+                  <span className="info-tip-term">New cost</span> — the raw Almedia cost of campaigns
+                  published that same month, invoiced up front (matured or not).
                 </li>
                 <li>
-                  <span className="info-tip-term">Stage 2 · Performance fee</span> = Σ INT × (1 +
-                  commission) − Σ cost (INT = cost ÷ 1.2), billed the next month once the batch's
-                  return settles. Floored at zero.
+                  <span className="info-tip-term">Carried fee</span> — last month's performance fee,
+                  Σ INT × (1 + commission) − Σ cost (INT = cost ÷ 1.2), billed once that batch's
+                  return settles. So June's fee lands on the July invoice.
                 </li>
                 <li>
                   <span className="info-tip-term">Blended return</span> = Σ media spend (return % ×
-                  cost ÷ 100) ÷ Σ cost picks one commission tier for the month's matured cohort.
+                  cost ÷ 100) ÷ Σ INT picks one commission tier for the month's matured cohort.
                 </li>
                 <li>
                   <span className="info-tip-term">Already invoiced</span> — the client is paid up on
@@ -255,16 +340,17 @@ export function InvoicesView() {
             </InfoTip>
           </div>
           <p className="hero-copy">
-            Cost is invoiced up front through <strong>{INVOICED_LABEL}</strong>; performance fees
-            have not been billed yet. Everything below marks what is still due — cost for later
-            months, and the fee owed on each settled month.
+            Each month's invoice is <strong>this month's cost plus last month's performance fee</strong>.
+            June's fee is billed in July, so the July invoice mixes new July cost with the June fee.
+            Cost is invoiced up front through <strong>{INVOICED_LABEL}</strong>; no performance fees
+            have been billed yet, so everything below marks what is still due.
           </p>
         </div>
         <div className="hero-side">
           <div className="view-actions">
             <p>
               {data.refreshing ? "Refreshing…" : `Updated ${timeAgo(data.fetchedAt)}`} ·{" "}
-              {totals.campaigns} campaigns
+              {campaignCount} campaigns
             </p>
             <button
               type="button"
@@ -289,7 +375,7 @@ export function InvoicesView() {
 
       <div className="kpi-grid invoices-kpis">
         <div className="kpi-card kpi-accent">
-          <p>To invoice now</p>
+          <p>To invoice {selectedLabel ? `in ${selectedLabel}` : "now"}</p>
           <strong>{formatUsd(totals.dueNow)}</strong>
           <span>unbilled cost + settled performance fees</span>
         </div>
@@ -317,12 +403,12 @@ export function InvoicesView() {
 
       <div className="filters invoices-filters">
         <label>
-          <span>Month</span>
+          <span>Invoice month</span>
           <select value={month} onChange={(event) => setMonth(event.target.value)}>
             <option value="all">All months</option>
             {monthOptions.map((value) => (
               <option key={value} value={value}>
-                {/^\d{4}-\d{2}$/.test(value) ? monthLabel(value) : value}
+                {monthLabel(value)}
               </option>
             ))}
           </select>
@@ -337,30 +423,47 @@ export function InvoicesView() {
         </button>
       </div>
 
-      {batches.length === 0 ? (
+      {visibleMonths.length === 0 ? (
         <div className="panel invoices-empty">
-          <p className="widget-empty">No campaigns with Almedia cost for this month.</p>
+          <p className="widget-empty">No invoice activity for this month.</p>
         </div>
       ) : (
-        <section className="panel invoices-months" aria-label="Invoices by publish month">
-          <header className="invoices-col-head">
-            <h2>By publish month</h2>
-            <span>{batches.length} {batches.length === 1 ? "month" : "months"} · click a month to expand</span>
-          </header>
-          <div className="month-list">
-            {batches.map((batch) => (
-              <MonthRow key={batch.month} batch={batch} onToggle={toggleInclude} />
-            ))}
-          </div>
-        </section>
+        <>
+          <section className="panel invoice-month-panel" aria-label="Invoices by calendar month">
+            <header className="invoices-col-head">
+              <h2>By invoice month</h2>
+              <span>what lands on each calendar month's invoice</span>
+            </header>
+            <div className="invoice-month-grid">
+              {visibleMonths.map((entry) => (
+                <InvoiceMonthCard key={entry.month} month={entry} />
+              ))}
+            </div>
+          </section>
+
+          <section className="panel invoices-months" aria-label="Publish batches feeding the invoices">
+            <header className="invoices-col-head">
+              <h2>By publish month</h2>
+              <span>
+                {visibleBatches.length} {visibleBatches.length === 1 ? "batch" : "batches"} · the
+                campaign detail behind each fee
+              </span>
+            </header>
+            <div className="month-list">
+              {visibleBatches.map((batch) => (
+                <MonthRow key={batch.month} batch={batch} onToggle={toggleInclude} />
+              ))}
+            </div>
+          </section>
+        </>
       )}
 
       <p className="widget-footnote invoices-footnote">
-        Cost (Stage 1) is billed the month a campaign publishes; the performance fee (Stage 2) = Σ
-        INT × (1 + commission) − Σ cost bills the next month, floored at zero. Commission comes from
-        the month's blended return (&lt;100% +20% · 100% +25% · 110% +30% · 130% +40% · 150% +50% ·
-        180% +60% · 250% +80% · ≥330% +100%). Matured = 14+ days since publish. Months with no
-        published campaigns don't appear.
+        Each calendar month's invoice = new cost (campaigns published that month, billed up front) +
+        the performance fee carried from the previous month's batch. The fee = Σ INT × (1 +
+        commission) − Σ cost, floored at zero, where commission comes from the batch's blended return
+        (&lt;100% +20% · 100% +25% · 110% +30% · 130% +40% · 150% +50% · 180% +60% · 250% +80% ·
+        ≥330% +100%). Matured = 14+ days since publish. Months with no activity don't appear.
         {undated.count > 0
           ? ` ${undated.count} campaign${undated.count === 1 ? "" : "s"} (${formatUsd(undated.cost)}) ${undated.count === 1 ? "has" : "have"} a cost but no publish date, so ${undated.count === 1 ? "it isn't" : "they aren't"} scheduled to a month.`
           : ""}

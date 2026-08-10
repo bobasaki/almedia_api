@@ -23,6 +23,104 @@
 .invoices-empty { padding: 40px 20px; }
 .invoices-footnote { margin-top: 18px; }
 
+/* ---- Invoice-month lens: what actually lands on each calendar invoice ---- */
+
+.invoice-month-panel { padding: 16px 20px 20px; margin-bottom: 20px; }
+
+.invoice-month-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.im-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.im-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2, rgba(0, 0, 0, 0.02));
+}
+.im-card-month { font-weight: 800; font-size: 16px; letter-spacing: -0.01em; }
+.im-card-total {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.im-lines { margin: 0; padding: 6px 16px; }
+.im-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+}
+.im-line + .im-line { border-top: 1px dashed var(--border); }
+.im-line dt { display: flex; flex-direction: column; gap: 2px; margin: 0; }
+.im-line-title { font-weight: 700; font-size: 13px; }
+.im-line-note { color: var(--muted); font-size: 11px; font-weight: 600; }
+.im-line dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  white-space: nowrap;
+}
+.im-line-amt {
+  font-weight: 800;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.im-line-amt.is-zero { color: var(--muted); font-weight: 700; }
+
+/* Reuse the accordion chip palette for the per-line status badges. */
+.im-line dd .chip {
+  display: inline-flex;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.im-line dd .chip-done { background: #e3f5ec; color: #147a4e; }
+.im-line dd .chip-due { background: #fdeccc; color: #9a5b00; }
+.im-line dd .chip-fee { background: #1f2a12; color: #d7f544; }
+.im-line dd .chip-pending { background: var(--border); color: var(--muted); }
+.im-line dd .chip-none { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+
+.im-card-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(26, 138, 90, 0.06), transparent 90%);
+}
+.im-card-foot span { color: var(--muted); font-size: 12px; font-weight: 600; }
+.im-card-foot strong {
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--good, #1a8a5a);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
 /* ---- Single month filter: a compact inline bar, not the full dimension grid ---- */
 
 .invoices-filters {

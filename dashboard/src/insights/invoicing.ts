@@ -19,8 +19,11 @@ import type { Deal } from "./types";
  *
  * At the base tier (commission 20%) `INT × 1.2 = cost`, so the fee is exactly
  * zero and only the up-front cost is billed. The commission steps up with the
- * batch's blended return (as a percentage), on inclusive lower bounds from the
- * rate card (the "min return" column is a decimal, shown here ×100):
+ * batch's blended return on internal cost — `Σ media spend ÷ Σ INT`, the PDF's
+ * return multiple `x` (shown here ×100). The denominator is INT, NOT cost: on a
+ * batch that returns 86.7% against cost, INT is 1.2× smaller, so `x` is 104% and
+ * the fee is real. Tiers are inclusive lower bounds from the rate card (the "min
+ * return" column is a decimal, shown here ×100):
  *
  *   return < 100%      → 20%   (the fixed base — the fee is zero here)
  *   return ≥ 100%      → 25%
@@ -113,23 +116,24 @@ export function mediaSpend(returnPct: number | null, cost: number | null): numbe
 }
 
 /**
- * The batch's blended (spend-weighted) return — Σ media spend ÷ Σ cost × 100.
- * Since each campaign's own return is media spend ÷ cost, blending over the
- * month is just the cost-weighted average return. A member with no measured
- * return yet still counts its cost in the denominator, dragging the blend down.
- * This single number picks one commission tier for the whole batch. Null when
- * Σ cost is zero.
+ * The batch's blended return on internal cost — Σ media spend ÷ Σ INT × 100,
+ * the PDF's return multiple `x` (shown ×100). The denominator is INT, NOT cost:
+ * the commission tier is selected on how the media spend compares to what we
+ * actually pay creators, so a batch returning 86.7% against cost is 104% against
+ * INT (INT is 1.2× smaller). A member with no measured return yet still counts
+ * its INT in the denominator, dragging the blend down. This single number picks
+ * one commission tier for the whole batch. Null when Σ INT is zero.
  */
 export function blendedReturn(
-  members: ReadonlyArray<{ cost: number; mediaSpend: number | null }>,
+  members: ReadonlyArray<{ int: number; mediaSpend: number | null }>,
 ): number | null {
   let spend = 0;
-  let cost = 0;
+  let int = 0;
   for (const member of members) {
-    cost += member.cost;
+    int += member.int;
     spend += member.mediaSpend ?? 0;
   }
-  return cost > 0 ? (spend / cost) * 100 : null;
+  return int > 0 ? (spend / int) * 100 : null;
 }
 
 /** A campaign inside a monthly batch, with whether it counts toward the bill. */
@@ -144,9 +148,13 @@ export interface BatchMember {
   int: number;
   /** Media spend the campaign drove = returnPct × cost ÷ 100 (USD); null until a return lands. */
   mediaSpend: number | null;
-  /** This member's own return % (media spend ÷ cost × 100); null with no return yet. */
+  /** This member's own return % against cost (media spend ÷ cost × 100); null with no return yet. */
   memberReturn: number | null;
-  /** The tier this member would earn on its own return — per-channel reference. */
+  /**
+   * The tier this member would earn on its own — per-channel reference. Selected
+   * on the INT-based return (memberReturn × 1.2), the same denominator the batch
+   * fee uses, so it can read higher than the against-cost `memberReturn` shown.
+   */
   ownTier: InvoiceTier;
   status: MaturityStatus;
   daysRemaining: number | null;
@@ -183,7 +191,7 @@ export interface InvoiceBatch {
   includedCount: number;
   /** Still-maturing channels available to opt into the fee blend. */
   maturingCount: number;
-  /** Blended return = Σ media spend ÷ Σ cost × 100 across the included members. */
+  /** Blended return on internal cost = Σ media spend ÷ Σ INT × 100 across the included members. */
   blendedReturn: number | null;
   /** The single commission tier the fee bills at. */
   tier: InvoiceTier;
@@ -211,6 +219,13 @@ export interface InvoiceBatch {
 function nextMonth(month: string): string {
   const [year, index] = month.split("-").map(Number);
   const rolled = index >= 12 ? { year: year + 1, index: 1 } : { year, index: index + 1 };
+  return `${rolled.year}-${String(rolled.index).padStart(2, "0")}`;
+}
+
+/** The calendar month before a `YYYY-MM` key, e.g. "2026-01" → "2025-12". */
+export function prevMonth(month: string): string {
+  const [year, index] = month.split("-").map(Number);
+  const rolled = index <= 1 ? { year: year - 1, index: 12 } : { year, index: index - 1 };
   return `${rolled.year}-${String(rolled.index).padStart(2, "0")}`;
 }
 
@@ -257,7 +272,7 @@ export function buildInvoiceBatches(
       int,
       mediaSpend: spend,
       memberReturn,
-      ownTier: invoiceTier(memberReturn),
+      ownTier: invoiceTier(memberReturn === null ? null : memberReturn * (1 + BASE_MARKUP)),
       status: maturity.status,
       daysRemaining: maturity.daysRemaining,
       month,
@@ -308,4 +323,98 @@ export function buildInvoiceBatches(
         feeSettled: maturingCount === 0,
       };
     });
+}
+
+/**
+ * One calendar month's actual invoice. A publish-month batch spans two invoices
+ * (cost now, fee next month), so the money that lands on any single month's
+ * invoice is two different batches: THIS month's cost plus LAST month's fee. This
+ * regroups the publish-month batches by the calendar month they are billed, so a
+ * July row reads "July cost + June fee = July invoice".
+ */
+export interface InvoiceMonth {
+  /** The calendar month this invoice is sent, e.g. "2026-07". */
+  month: string;
+  label: string;
+  /** Stage 1 cost from campaigns published THIS month (the same-month batch). */
+  newCost: number;
+  /** Whether that cost has already been invoiced (publish month ≤ cutoff). */
+  costInvoiced: boolean;
+  /** The publish batch whose cost lands this month; null if none published. */
+  costBatch: InvoiceBatch | null;
+  /** Stage 2 fee carried from LAST month's batch — settled and billable now. */
+  carriedFee: number;
+  /** Fee from last month's batch still maturing (not yet billable). */
+  feePending: number;
+  /** Whether last month's batch has settled, so its fee is final. */
+  feeSettled: boolean;
+  /** The prior publish batch whose fee lands this month; null if none. */
+  feeBatch: InvoiceBatch | null;
+  /** Total billable on this month's invoice = newCost + carriedFee. */
+  total: number;
+}
+
+/**
+ * Regroup publish-month batches into the calendar months they are actually
+ * invoiced. Each batch contributes its cost to its own publish month and its
+ * performance fee to the next month, so a calendar month collects at most one
+ * cost batch and one fee batch. Most recent invoice month first.
+ */
+export function buildInvoiceMonths(batches: InvoiceBatch[]): InvoiceMonth[] {
+  interface Accumulator {
+    month: string;
+    newCost: number;
+    costInvoiced: boolean;
+    costBatch: InvoiceBatch | null;
+    carriedFee: number;
+    feePending: number;
+    feeSettled: boolean;
+    feeBatch: InvoiceBatch | null;
+  }
+
+  const byMonth = new Map<string, Accumulator>();
+  const ensure = (month: string): Accumulator => {
+    const existing = byMonth.get(month);
+    if (existing) return existing;
+    const created: Accumulator = {
+      month,
+      newCost: 0,
+      costInvoiced: true,
+      costBatch: null,
+      carriedFee: 0,
+      feePending: 0,
+      feeSettled: true,
+      feeBatch: null,
+    };
+    byMonth.set(month, created);
+    return created;
+  };
+
+  for (const batch of batches) {
+    // Cost lands the month the batch publishes. One batch per publish month, so
+    // a direct assignment of the invoiced flag is correct.
+    const costRow = ensure(batch.month);
+    costRow.newCost += batch.baseTotal;
+    costRow.costBatch = batch;
+    costRow.costInvoiced = batch.costInvoiced;
+
+    // Fee lands the month after. Settled fees are billable now; a still-maturing
+    // batch's fee is only an estimate, so it sits in feePending.
+    const feeRow = ensure(batch.feeMonth);
+    feeRow.feeBatch = batch;
+    if (batch.feeSettled) {
+      feeRow.carriedFee += batch.performanceFee;
+    } else {
+      feeRow.feePending += batch.performanceFee;
+      feeRow.feeSettled = false;
+    }
+  }
+
+  return [...byMonth.values()]
+    .map((row) => ({
+      ...row,
+      label: monthLabel(row.month),
+      total: row.newCost + row.carriedFee,
+    }))
+    .sort((a, b) => b.month.localeCompare(a.month));
 }

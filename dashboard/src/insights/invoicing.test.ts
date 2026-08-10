@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   blendedReturn,
   buildInvoiceBatches,
+  buildInvoiceMonths,
   invoiceAmount,
   invoiceTier,
 } from "./invoicing";
@@ -86,25 +87,32 @@ describe("invoiceTier / invoiceAmount", () => {
 });
 
 describe("blendedReturn", () => {
-  it("blends media spend against cost (the spend-weighted average return)", () => {
-    // Σ cost 10,000. Σ media spend 20,000 → 200%.
+  it("blends media spend against INT (the return multiple x that picks the tier)", () => {
+    // Σ INT 10,000. Σ media spend 20,000 → 200%.
     const value = blendedReturn([
-      { cost: 5_000, mediaSpend: 15_000 },
-      { cost: 5_000, mediaSpend: 5_000 },
+      { int: 5_000, mediaSpend: 15_000 },
+      { int: 5_000, mediaSpend: 5_000 },
     ]);
     expect(value).toBeCloseTo(200, 6);
   });
 
-  it("counts cost even with no media spend yet, and is null with no cost", () => {
-    expect(blendedReturn([{ cost: 5_000, mediaSpend: null }])).toBe(0); // 0 / 5,000
+  it("uses INT, not cost, as the denominator (the PDF's June example)", () => {
+    // INT 178,622.50, media spend 185,766.23 → x = 1.04 = 104% (86.7% against cost).
+    const value = blendedReturn([{ int: 178_622.5, mediaSpend: 185_766.23 }]);
+    expect(value).toBeCloseTo(104, 1);
+    expect(invoiceTier(value!).id).toBe("c25"); // 100 ≤ 104 < 110 → +25%
+  });
+
+  it("counts INT even with no media spend yet, and is null with no INT", () => {
+    expect(blendedReturn([{ int: 5_000, mediaSpend: null }])).toBe(0); // 0 / 5,000
     expect(blendedReturn([])).toBeNull();
   });
 });
 
 describe("buildInvoiceBatches", () => {
   it("bills the whole month at the tier its blended media-spend return earns", () => {
-    // INT = cost ÷ 1.2 → 5k each. Media spend = returnPct × cost ÷ 100 → 18,000 and 6,000.
-    // Blended 24,000 / 12,000 = 200% → c60.
+    // INT = cost ÷ 1.2 → 5k each, Σ INT 10,000. Media spend = returnPct × cost ÷ 100 → 18,000
+    // and 6,000. Blended on INT: 24,000 / 10,000 = 240% → c60 (180 ≤ 240 < 250).
     const deals = [
       deal({ channelKey: "A", publishedAt: MATURED, cost: 6_000, returnPct: 300 }),
       deal({ channelKey: "B", publishedAt: MATURED, cost: 6_000, returnPct: 100 }),
@@ -114,7 +122,7 @@ describe("buildInvoiceBatches", () => {
     expect(batches).toHaveLength(1);
     const batch = batches[0];
     expect(batch.month).toBe("2026-08");
-    expect(batch.blendedReturn).toBeCloseTo(200, 6);
+    expect(batch.blendedReturn).toBeCloseTo(240, 6);
     expect(batch.tier.id).toBe("c60");
     expect(batch.intTotal).toBe(10_000); // Σ INT = Σ cost ÷ 1.2
     expect(batch.baseTotal).toBe(12_000); // Σ Almedia cost billed up front
@@ -146,11 +154,12 @@ describe("buildInvoiceBatches", () => {
     expect(batch.maturingCount).toBe(1);
     expect(batch.feeSettled).toBe(false);
     expect(batch.baseTotal).toBe(15_000); // 6,000 + 9,000 — every campaign's cost up front
-    // Fee on the matured cohort only: 300% → c80 (0.8); INT 5,000 × 1.8 − 6,000 = 3,000.
-    expect(batch.blendedReturn).toBeCloseTo(300, 6);
-    expect(batch.tier.id).toBe("c80");
-    expect(batch.performanceFee).toBe(3_000);
-    expect(batch.amount).toBe(18_000); // 15,000 cost + 3,000 fee
+    // Fee on the matured cohort only. Return on INT: 18,000 / 5,000 = 360% → c100 (1.0);
+    // INT 5,000 × 2.0 − 6,000 = 4,000. (Against cost it is 300%, but INT is the denominator.)
+    expect(batch.blendedReturn).toBeCloseTo(360, 6);
+    expect(batch.tier.id).toBe("c100");
+    expect(batch.performanceFee).toBe(4_000);
+    expect(batch.amount).toBe(19_000); // 15,000 cost + 4,000 fee
   });
 
   it("marks cost invoiced through the cutoff month", () => {
@@ -166,11 +175,12 @@ describe("buildInvoiceBatches", () => {
   });
 
   it("floors the fee at zero when the blend sits at or below the base tier", () => {
-    // cost 6k → INT 5k. Media spend 2,880 → 48% → c20 (base). INT × 1.2 = cost, so fee 0.
+    // cost 6k → INT 5k. Media spend 2,880. On INT: 2,880 / 5,000 = 57.6% → c20 (base, < 100%).
+    // INT × 1.2 = cost, so fee 0.
     const deals = [deal({ channelKey: "LOW", publishedAt: MATURED, cost: 6_000, returnPct: 48 })];
     const batch = buildInvoiceBatches(deals, new Set(), NOW)[0];
 
-    expect(batch.blendedReturn).toBeCloseTo(48, 6);
+    expect(batch.blendedReturn).toBeCloseTo(57.6, 6);
     expect(batch.tier.id).toBe("c20");
     expect(batch.baseTotal).toBe(6_000);
     expect(batch.performanceFee).toBe(0);
@@ -192,7 +202,7 @@ describe("buildInvoiceBatches", () => {
     expect(before.maturingCount).toBe(1);
     expect(before.baseTotal).toBe(12_000); // both costs billed up front, matured or not
 
-    // Opt the maturing giant in: media spend 2,880 + 28,800 = 31,680 / 12,000 cost = 264% → c80.
+    // Opt the maturing giant in: media spend 2,880 + 28,800 = 31,680 / 10,000 INT = 316.8% → c80.
     const after = buildInvoiceBatches(deals, new Set(["FRESH"]), NOW)[0];
     expect(after.tier.id).toBe("c80");
     expect(after.baseTotal).toBe(12_000);
@@ -220,5 +230,70 @@ describe("buildInvoiceBatches", () => {
     const batches = buildInvoiceBatches(deals, new Set(), NOW);
     expect(batches.map((b) => b.month)).toEqual(["2026-07", "2026-05"]);
     expect(batches[0].feeMonth).toBe("2026-08"); // fee bills the month after publish
+  });
+});
+
+describe("buildInvoiceMonths", () => {
+  it("puts this month's cost and last month's fee on the same calendar invoice", () => {
+    // June batch: two matured campaigns → c60, cost 12,000, fee 4,000 (lands July).
+    // July batch: two matured campaigns → c60, cost 12,000, fee 4,000 (lands August).
+    const deals = [
+      deal({ channelKey: "JUN-A", publishedAt: "2026-06-01T00:00:00Z", cost: 6_000, returnPct: 300 }),
+      deal({ channelKey: "JUN-B", publishedAt: "2026-06-01T00:00:00Z", cost: 6_000, returnPct: 100 }),
+      deal({ channelKey: "JUL-A", publishedAt: "2026-07-01T00:00:00Z", cost: 6_000, returnPct: 300 }),
+      deal({ channelKey: "JUL-B", publishedAt: "2026-07-01T00:00:00Z", cost: 6_000, returnPct: 100 }),
+    ];
+    const batches = buildInvoiceBatches(deals, new Set(), NOW);
+    const months = Object.fromEntries(buildInvoiceMonths(batches).map((m) => [m.month, m]));
+
+    // The July invoice = July's new cost + June's carried fee.
+    expect(months["2026-07"].newCost).toBe(12_000);
+    expect(months["2026-07"].carriedFee).toBe(4_000); // June's fee, now settled
+    expect(months["2026-07"].feeBatch?.month).toBe("2026-06");
+    expect(months["2026-07"].feeSettled).toBe(true);
+    expect(months["2026-07"].total).toBe(16_000);
+
+    // June's own invoice carries no prior fee here (no May batch).
+    expect(months["2026-06"].newCost).toBe(12_000);
+    expect(months["2026-06"].carriedFee).toBe(0);
+    expect(months["2026-06"].total).toBe(12_000);
+
+    // A trailing fee-only month appears for July's fee, with no new cost.
+    expect(months["2026-08"].newCost).toBe(0);
+    expect(months["2026-08"].costBatch).toBeNull();
+    expect(months["2026-08"].carriedFee).toBe(4_000);
+    expect(months["2026-08"].total).toBe(4_000);
+  });
+
+  it("keeps a still-maturing fee out of the billable total as pending", () => {
+    // The August batch has a matured + a fresh member, so its fee is not settled.
+    // That fee lands on the September invoice, where it must sit as pending.
+    const deals = [
+      deal({ channelKey: "DONE", publishedAt: MATURED, cost: 6_000, returnPct: 300 }),
+      deal({ channelKey: "YOUNG", publishedAt: FRESH, cost: 9_000, returnPct: 300 }),
+    ];
+    const batches = buildInvoiceBatches(deals, new Set(), NOW);
+    expect(batches[0].month).toBe("2026-08");
+    expect(batches[0].feeSettled).toBe(false);
+
+    const months = Object.fromEntries(buildInvoiceMonths(batches).map((m) => [m.month, m]));
+    const september = months["2026-09"]; // August's fee lands here
+    expect(september.newCost).toBe(0);
+    expect(september.feeSettled).toBe(false);
+    expect(september.carriedFee).toBe(0); // not billable while maturing
+    expect(september.feePending).toBeGreaterThan(0);
+    expect(september.total).toBe(0); // pending fee excluded from the total
+  });
+
+  it("carries no fee for a base-tier month", () => {
+    const deals = [
+      deal({ channelKey: "LOW", publishedAt: "2026-06-01T00:00:00Z", cost: 6_000, returnPct: 48 }),
+    ];
+    const batches = buildInvoiceBatches(deals, new Set(), NOW);
+    const months = Object.fromEntries(buildInvoiceMonths(batches).map((m) => [m.month, m]));
+    // July would carry June's fee, but the base tier floors it to zero.
+    expect(months["2026-07"].carriedFee).toBe(0);
+    expect(months["2026-07"].feePending).toBe(0);
+    expect(months["2026-07"].total).toBe(0);
   });
 });
